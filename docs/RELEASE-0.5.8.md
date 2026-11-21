@@ -7,12 +7,12 @@ No credentials, keys, uploaded documents or production database are in Git.
 
 ## Reproducible application source
 
-- API application revision: `a2a67e37da56d13efe472545e322a49a7a8052bf`.
-- Manager revision: `b310de92ba20339090bf210898cc493a360c1370`.
-- CPA: `8.0.75-documents.2`; plugin: `0.5.8-reconstructed`.
+- API application revision: `b90731ca5026bb3b6817acd095aa76ebecc32ca9`.
+- Manager revision: `b90731ca5026bb3b6817acd095aa76ebecc32ca9`.
+- CPA: `8.0.75-documents.3`; plugin: `0.5.8-reconstructed`.
 - Manager: `v1.14.10-bps.1`.
-- API image: `sha256:88354786a2d00d1a792589e9369ad2f57660ca93d39e00730d9900117117201d`.
-- Manager image: `sha256:a59cab401bde4bd71bfdbc5c5f626a6f9c70da14bf7ee0f65312cafa381d82e1`.
+- API image: `sha256:89b7bbe1b6a4f46e65258fe1cd2c9a0915c8f42613a5ab32f8f0ef0e1ba90de7`.
+- Manager image: `sha256:81acbc21d6cca55db91d7f70a8014c1167f9ed572f084d41a5c0b4b799393922`.
 - Patched panel: `sha256:bdebe3e20abd10988e955b7c5384d712b06c992b1d824cc91c34376bd3d22992`.
 
 Later commits improve deployment rehearsal/readiness handling and documentation;
@@ -39,7 +39,7 @@ rollback instructions are in [OPERATIONS.md](OPERATIONS.md).
   XLTX, XLS, CSV, TSV, text PDF, scanned PDF, mixed chart PDF, encrypted PDF
   rejection and corrupt PDF rejection.
 - Real `gpt-6.1-sol` Responses SSE returned the exact expected short answer
-  in 3.20 seconds. Chat Completions correctly analyzed uploaded Excel and PDF
+  in 3.27 seconds. Chat Completions correctly analyzed uploaded Excel and PDF
   together in 2.83 seconds. Responses correctly analyzed an uploaded scanned
   PDF in 6.12 seconds. These are individual smoke measurements, not a latency
   benchmark or service-level guarantee.
@@ -50,11 +50,15 @@ rollback instructions are in [OPERATIONS.md](OPERATIONS.md).
   hide the real top-level token usage in non-streaming Responses. The release
   fixes this for both complete response objects and bare completed SSE events.
   Sixteen regression combinations and the full parser package race tests pass.
-- After the repair, real non-streaming Responses, Chat Completions and SSE
+- On the final public-source build, real non-streaming Responses, Chat Completions and SSE
   requests all returned HTTP 200 and the expected answer. Each response's input,
   output and cached-token counts matched its Manager record by request trace.
-  The two warm requests reported 17,621 cached input tokens out of 17,624;
+  The two warm requests reported 17,620 cached input tokens out of 17,623;
   this describes those individual requests, not a general cache-hit guarantee.
+- Google Antigravity OAuth registration is now external environment
+  configuration, documented in the operations guide. Missing/configured
+  registration and refresh paths have targeted tests and race checks. Existing
+  valid access tokens remain usable; BPS and Codex do not use these variables.
 
 Local regression coverage and remaining upstream test limitations are documented
 in [VALIDATION.md](VALIDATION.md). Production was not load-tested to saturation.
