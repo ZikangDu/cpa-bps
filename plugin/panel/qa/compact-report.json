@@ -1,0 +1,142 @@
+[
+  {
+    "width": 1440,
+    "documentWidth": 1440,
+    "rows": [
+      {
+        "height": 164.796875,
+        "width": 1186,
+        "children": 7,
+        "controlsWidth": 358.75,
+        "overflow": false
+      },
+      {
+        "height": 164.796875,
+        "width": 1186,
+        "children": 7,
+        "controlsWidth": 358.75,
+        "overflow": false
+      },
+      {
+        "height": 164.796875,
+        "width": 1186,
+        "children": 7,
+        "controlsWidth": 358.75,
+        "overflow": false
+      }
+    ],
+    "statuses": [
+      {
+        "cls": "bps-quality-bar bps-quality-empty",
+        "color": "rgba(15, 23, 42, 0.08)"
+      },
+      {
+        "cls": "bps-quality-bar bps-quality-empty",
+        "color": "rgba(15, 23, 42, 0.08)"
+      },
+      {
+        "cls": "bps-quality-bar bps-quality-empty",
+        "color": "rgba(15, 23, 42, 0.08)"
+      },
+      {
+        "cls": "bps-quality-bar bps-quality-empty",
+        "color": "rgba(15, 23, 42, 0.08)"
+      },
+      {
+        "cls": "bps-quality-bar bps-quality-pass",
+        "color": "color(srgb 0.106667 0.618039 0.294902)"
+      },
+      {
+        "cls": "bps-quality-bar bps-quality-request_error",
+        "color": "rgb(183, 121, 31)"
+      },
+      {
+        "cls": "bps-quality-bar bps-quality-timeout",
+        "color": "rgb(183, 121, 31)"
+      },
+      {
+        "cls": "bps-quality-bar bps-quality-answer_fail",
+        "color": "color(srgb 0.843529 0.24 0.24)"
+      },
+      {
+        "cls": "bps-quality-bar bps-quality-pass",
+        "color": "color(srgb 0.106667 0.618039 0.294902)"
+      },
+      {
+        "cls": "bps-quality-bar bps-quality-pass",
+        "color": "color(srgb 0.106667 0.618039 0.294902)"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "width": 768,
+    "documentWidth": 768,
+    "rows": [
+      {
+        "height": 266.796875,
+        "width": 744,
+        "children": 7,
+        "controlsWidth": 361,
+        "overflow": false
+      },
+      {
+        "height": 266.796875,
+        "width": 744,
+        "children": 7,
+        "controlsWidth": 361,
+        "overflow": false
+      },
+      {
+        "height": 266.796875,
+        "width": 744,
+        "children": 7,
+        "controlsWidth": 361,
+        "overflow": false
+      }
+    ],
+    "statuses": [
+      {
+        "cls": "bps-quality-bar bps-quality-empty",
+        "color": "rgba(15, 23, 42, 0.08)"
+      },
+      {
+        "cls": "bps-quality-bar bps-quality-empty",
+        "color": "rgba(15, 23, 42, 0.08)"
+      },
+      {
+        "cls": "bps-quality-bar bps-quality-empty",
+        "color": "rgba(15, 23, 42, 0.08)"
+      },
+      {
+        "cls": "bps-quality-bar bps-quality-empty",
+        "color": "rgba(15, 23, 42, 0.08)"
+      },
+      {
+        "cls": "bps-quality-bar bps-quality-pass",
+        "color": "color(srgb 0.106667 0.618039 0.294902)"
+      },
+      {
+        "cls": "bps-quality-bar bps-quality-request_error",
+        "color": "rgb(183, 121, 31)"
+      },
+      {
+        "cls": "bps-quality-bar bps-quality-timeout",
+        "color": "rgb(183, 121, 31)"
+      },
+      {
+        "cls": "bps-quality-bar bps-quality-answer_fail",
+        "color": "color(srgb 0.843529 0.24 0.24)"
+      },
+      {
+        "cls": "bps-quality-bar bps-quality-pass",
+        "color": "color(srgb 0.106667 0.618039 0.294902)"
+      },
+      {
+        "cls": "bps-quality-bar bps-quality-pass",
+        "color": "color(srgb 0.106667 0.618039 0.294902)"
+      }
+    ],
+    "errors": []
+  }
+]

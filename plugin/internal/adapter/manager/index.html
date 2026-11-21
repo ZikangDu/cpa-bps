@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ if .DelegatedGateway }}BPS 网关接入{{ else }}BPS 账号授权{{ end }}</title>
+  <link rel="stylesheet" href="auth.css">
+  {{ if not .DelegatedGateway }}
+  <script defer src="auth.js"></script>
+  {{ end }}
+</head>
+<body data-oauth-ready="{{ .OAuthReady }}" data-bps-login="{{ .BPSLogin }}">
+  <main>
+    {{ if .DelegatedGateway }}
+    <header class="page-header">
+      <h1>BPS 网关接入</h1>
+      <p>本地 CPA 将 BPS 模型请求发送给上游 CPA。</p>
+    </header>
+    <section class="session-panel" aria-labelledby="gateway-heading">
+      <h2 id="gateway-heading">授权方式</h2>
+      <div class="session-status">
+        <strong>网关托管</strong>
+        <p>上游 CPA 管理 BPS 登录和令牌刷新。本地请求使用上游账号的额度。</p>
+      </div>
+      <p class="help">本实例的调用路径为 <code>/v1/responses</code>。</p>
+    </section>
+    {{ else }}
+    <header class="page-header">
+      <h1>BPS 账号授权</h1>
+      <p>完成登录和回调后，CPA 会把账号添加到凭据管理。</p>
+    </header>
+
+    <div class="workspace">
+      <ol class="workflow" aria-label="账号授权步骤">
+        <li class="step">
+          <span class="step-number" aria-hidden="true">1</span>
+          <div class="step-content">
+            <h2>生成链接</h2>
+            <div id="standalone" class="fields">
+              <label for="admin-key">CPA 管理密钥</label>
+              <input id="admin-key" type="password" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="actions">
+              <button id="start" class="primary" type="button" disabled>生成授权链接</button>
+              <button id="reset" type="button" disabled>清空本页</button>
+            </div>
+          </div>
+        </li>
+        <li class="step">
+          <span class="step-number" aria-hidden="true">2</span>
+          <div class="step-content">
+            <h2>打开链接并登录</h2>
+            <div class="fields">
+              <label for="authorization-link">本次授权链接</label>
+              <textarea id="authorization-link" class="url-field" rows="2" placeholder="生成后在此显示" readonly spellcheck="false"></textarea>
+            </div>
+            <div class="actions">
+              <a id="authorize" class="button" role="link" target="_blank" rel="noopener noreferrer" aria-disabled="true" tabindex="-1">打开授权页</a>
+              <button id="copy" type="button" disabled>复制链接</button>
+            </div>
+          </div>
+        </li>
+        <li class="step" id="callback-form">
+          <span class="step-number" aria-hidden="true">3</span>
+          <div class="step-content">
+            <h2>确认授权</h2>
+            {{ if .BPSLogin }}
+            <p class="help">登录后，复制浏览器中以 <code>https://bps.openai.com/basispoints/extension/</code> 开头的完整回调地址，粘贴到下方提交。</p>
+            {{ else }}
+            <p class="help">CPA 会检查是否已收到回调。需要手动提交时，请粘贴登录后浏览器里的完整地址。</p>
+            {{ end }}
+            <div class="fields">
+              <label for="callback">回调地址</label>
+              <textarea id="callback" class="url-field" rows="2" maxlength="16384" spellcheck="false" placeholder="粘贴本次登录的回调地址" disabled></textarea>
+            </div>
+            <div class="actions">
+              <button id="submit" type="button" disabled>提交回调</button>
+              <button id="check" type="button" disabled>检查授权状态</button>
+            </div>
+          </div>
+        </li>
+      </ol>
+
+      <aside class="session-panel" aria-labelledby="status-heading">
+        <h2 id="status-heading">授权状态</h2>
+        <div class="session-status" role="status" aria-live="polite">
+          <strong id="authorization-state">检查授权配置</strong>
+          <p id="status">正在读取当前实例的授权配置。</p>
+        </div>
+        <p id="provider-note" class="help"></p>
+      </aside>
+    </div>
+    {{ end }}
+  </main>
+</body>
+</html>

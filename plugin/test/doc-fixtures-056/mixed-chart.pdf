@@ -1,0 +1,37 @@
+%PDF-1.4
+%synthetic
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Count 1 /Kids [3 0 R] >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 400] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 267 >>
+stream
+BT /F1 20 Tf 30 360 Td (Quarterly units) Tj ET
+0.2 0.4 0.8 rg 70 60 70 100 re f 220 60 70 200 re f
+0 0 0 rg BT /F1 18 Tf 90 35 Td (A) Tj 150 0 Td (B) Tj ET
+BT /F1 18 Tf 85 175 Td (10) Tj 150 100 Td (20) Tj ET
+BT /F1 10 Tf 20 395 Td (DOCUMENT_CHART_FIXTURE_056) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000020 00000 n 
+0000000069 00000 n 
+0000000126 00000 n 
+0000000252 00000 n 
+0000000569 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+639
+%%EOF

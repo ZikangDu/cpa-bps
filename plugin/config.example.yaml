@@ -1,0 +1,40 @@
+# Keep each conversation on one account while distributing new conversations.
+# This is account affinity, not an upstream cache-retention setting.
+routing:
+  strategy: round-robin
+  session-affinity: true
+  session-affinity-ttl: 24h
+  session-affinity-subagents: true
+  # Rebind only after an account failure; stay on the replacement after recovery.
+  session-affinity-rebind-on: any
+  retry:
+    request-retry: 0
+    max-retry-credentials: 0
+
+plugins:
+  enabled: true
+  dir: ./plugins
+  configs:
+    cpa-bps:
+      enabled: true
+      oauth_preset: bps
+      # Use the same local proxy as the browser if needed.
+      # oauth_proxy_url: http://127.0.0.1:1082
+      # Discover the catalog authorized for each account.
+      models: []
+      auto_discover: true
+      model_suffix: ""
+      fast_mode: false
+      # Automatically select the tool protocol; no per-request manual switching.
+      bps_tool_transport: auto
+      # Installed by the local document-runtime setup; users submit files normally.
+      document_worker_path: ./plugins/bps-document-worker
+      document_python: ./plugins/document-runtime/bin/python
+      native_tool_repair_attempts: 2
+      # bps_tools_version_id: authorized-catalog-version
+      # Optional compaction override; 0 uses native default 200000 or omits it in text mode.
+      bps_compact_threshold: 0
+      account_concurrency_limit: 1
+      omit_encrypted_history: false
+      # Private schedules and answer history; contains no OAuth credentials.
+      quality_state_path: ./plugins/cpa-bps-quality.json

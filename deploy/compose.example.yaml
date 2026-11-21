@@ -1,0 +1,41 @@
+name: cpa-bps
+services:
+  cli-proxy-api:
+    image: local/cpa-bps-rebuilt-api:0.5.8
+    container_name: cpa-bps-api
+    restart: unless-stopped
+    pull_policy: never
+    environment:
+      TZ: Asia/Shanghai
+      CPA_DOCUMENTS_DIR: /var/lib/cpa-documents
+      MANAGEMENT_STATIC_PATH: /opt/cpa-bps/management.html
+    ports:
+      - "127.0.0.1:8317:8317"
+    volumes:
+      - ./config.yaml:/CLIProxyAPI/config.yaml
+      - ./auths:/root/.cli-proxy-api
+      - ./logs:/CLIProxyAPI/logs
+      - ./rebuild-state:/var/lib/cpa-bps
+      - ./document-files:/var/lib/cpa-documents
+  cpa-manager-plus:
+    image: local/cpa-bps-rebuilt-manager:0.5.8
+    container_name: cpa-bps-manager
+    restart: unless-stopped
+    pull_policy: never
+    environment:
+      TZ: Asia/Shanghai
+      HTTP_ADDR: 0.0.0.0:18317
+      PANEL_PATH: /opt/cpa-bps/management.html
+      USAGE_DB_PATH: /data/usage.sqlite
+      USAGE_DATA_DIR: /data
+      CPA_MANAGER_DATA_KEY_PATH: /data/data.key
+      CPA_MANAGER_ADMIN_KEY_FILE: /run/secrets/manager-admin-key
+      USAGE_COLLECTOR_MODE: http
+    ports:
+      - "127.0.0.1:18317:18317"
+    volumes:
+      - ./manager-data:/data
+      - ./secrets/manager-admin-key:/run/secrets/manager-admin-key:ro
+    depends_on:
+      cli-proxy-api:
+        condition: service_healthy

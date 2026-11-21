@@ -1,0 +1,12 @@
+.git
+.codex
+bps-research
+dist
+**/build
+**/node_modules
+**/__pycache__
+**/*.pyc
+**/.git
+**/.env
+*.zip
+DEPLOYMENT.md

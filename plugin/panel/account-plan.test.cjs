@@ -1,0 +1,20 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const source=fs.readFileSync(__dirname+'/account-plan.js','utf8');
+const requests=[];
+let reply={accounts:[{auth_index:'A',plan_type:'team',source:'token_claims'}]};
+const state={Iae:{team:'Team',pro:'Pro'},Xl:{get:async(path,options)=>{requests.push({path,options});return reply;}},Jl:s=>({scope:s}),Promise,Map,Date,setInterval,clearInterval,document:{hidden:false}};
+vm.createContext(state);vm.runInContext(source,state);
+(async()=>{
+ const scope={apiBase:'http://fixture',managementKey:'fixture-manager'};
+ const [first,second]=await Promise.all([state.bpsPlanDirectory(scope,1000),state.bpsPlanDirectory(scope,1001)]);
+ assert.equal(requests.length,1);assert.equal(first,second);
+ assert.equal(state.bpsPlanLabel(first.accounts[0].plan_type),'Team');
+ assert.equal(state.bpsPlanLabel('PRO'),'Pro');assert.equal(state.bpsPlanLabel('<script>'),null);
+ await state.bpsPlanDirectory({...scope,managementKey:'another-manager'},1001);assert.equal(requests.length,2);
+ await state.bpsPlanDirectory(scope,12000);assert.equal(requests.length,3);
+ assert.equal(requests[0].path,'/cpa-bps/plan-observations');
+ assert.deepEqual(JSON.parse(JSON.stringify(await state.bpsPlanDirectory({apiBase:'http://fixture'},1001))),{accounts:[]});
+ console.log('PASS BPS plan display: grant fallback labels, shared local lookup, connection isolation and expiry');
+})().catch(e=>{console.error(e);process.exitCode=1;});

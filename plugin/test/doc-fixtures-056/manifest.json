@@ -1,0 +1,53 @@
+{
+  "synthetic_only": true,
+  "files": {
+    "financials.tsv": {
+      "bytes": 69,
+      "sha256": "28703506f90e10dd5df35e378f0f1a4aaf69ca5875b4b6f720c0d35ee572ccc8"
+    },
+    "financials.pdf": {
+      "bytes": 716,
+      "sha256": "4d593d428bf5def51869b1e0d95e2c5d4a308d8d3e7d3df67c6fe6a69b106340"
+    },
+    "financials.xls": {
+      "bytes": 5632,
+      "sha256": "87a848f8d999131d85519ba7076992666eb34d2c8475c458183c8e20850be634"
+    },
+    "encrypted.pdf": {
+      "bytes": 1241,
+      "sha256": "b5e5e73c9796ec801e3d02b2004459a257a35084c57de928753b0d0754da0f1b"
+    },
+    "financials.xlsx": {
+      "bytes": 1485,
+      "sha256": "5b36c980e5b470dce38416ea21b737a1e7ab8bf80714962eed66a926a5e9aeaa"
+    },
+    "financials.xlsm": {
+      "bytes": 1499,
+      "sha256": "5ebe60913862317239bfb6cd74508093e5aabec8abc4af025db91bebc52fc5a6"
+    },
+    "corrupt.pdf": {
+      "bytes": 30,
+      "sha256": "5b620555957f230502bce443d7a4070e46d93d6f843c7d3e86206ae3447efb5d"
+    },
+    "financials.csv": {
+      "bytes": 69,
+      "sha256": "188b81dc2315cba9c878957657ac176f97545bfc0b97987ab6b90ce45a949f47"
+    },
+    "mixed-chart.pdf": {
+      "bytes": 822,
+      "sha256": "cced4b8978baad6eecc89284fd9097898b80afcfdfb289dd0d11d1ba3e6c5883"
+    },
+    "scan-financials.pdf": {
+      "bytes": 55039,
+      "sha256": "03bdf8e66ea76d9ad61327eee887e16625af813c0cb75f9a33558f4d5e1fe96b"
+    },
+    "financials.xltx": {
+      "bytes": 1488,
+      "sha256": "e572ed282f66ee6a01ea749130bdc6a553524d4970549279f1beeb265f7d8120"
+    },
+    "scan-financials.png": {
+      "bytes": 38049,
+      "sha256": "396a22fd9fb70b230bd2f20c5237a00a33f5b5b657778c588b33b4067305de6f"
+    }
+  }
+}

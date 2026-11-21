@@ -1,0 +1,25 @@
+# Private research and live runtime material stay outside the maintained tree.
+/.codex/
+/bps-research/
+/DEPLOYMENT.md
+/runtime/
+/uploads/
+/config.yaml
+/compose.yaml
+/dist/
+/build/
+*.log
+__pycache__/
+*.pyc
+node_modules/
+.venv/
+.env
+.env.*
+!.env.example
+*.sqlite*
+*.db
+auths/
+secrets/
+backups/
+document-files/
+.DS_Store

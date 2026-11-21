@@ -1,0 +1,33 @@
+{
+  "complete_bundle_syntax": "pass",
+  "patch_idempotence": "pass",
+  "node_suites": [
+    "quota-card.test.cjs",
+    "quota-detail.test.cjs",
+    "quality-check.test.cjs",
+    "concurrency-card.test.cjs"
+  ],
+  "build_sha256": "3a4877e0c3d2da2ce5db84869f06457153c0100411a57363e5fa7914db3a9005",
+  "api": {
+    "config": "GET/PUT /cpa-bps/quality/config?auth_index",
+    "models": "GET /cpa-bps/quality/models?auth_index",
+    "results": "GET /cpa-bps/quality/results?auth_index",
+    "run": "POST /cpa-bps/quality/run?auth_index"
+  },
+  "installation": "not installed; runtime and real accounts untouched",
+  "visual_rounds": 2,
+  "visual_note": "Pure synthetic fixture; final action-column adjustment preserves original 54px switch/detail and uses 2-column quick-action grid. No live account controls were clicked.",
+  "model_mismatch": "pass answer with model_mismatch is amber, explicitly not counted as selected-model pass; absent actual model shown as not provided",
+  "models_cache": "Per account/API/key owner caches settled models promise, including rejection; recurring 15s poll reads local config/results only. Explicit settings Refresh models clears cache; owner changes abort and replace cache.",
+  "models_regression": "1 directory GET across initial load and 6 successful same-owner refreshes; 1 explicit directory retry, then 4 failed-cache polls with 0 retries; changed API/key owner gets separate directory.",
+  "errors": "Policy blocked / paused account / globally busy / cooldown / 403 denied / generic 409 distinguished by error code and status.",
+  "zero_time": "Dates earlier than 2000 are unavailable; next-due title requires enabled config and valid date.",
+  "reset_shortcut": "24px SVG ticket beside summary, disabled with hover-only reason when ineligible; opens existing confirmation with no POST; confirmed redeem reuses duplicate/uncertain guard.",
+  "concurrency_editor": "Always visible compact limit input and Save row; 0 means unlimited in title and ARIA description, scoped API body unchanged.",
+  "quality_storage_error": "state_error parses from Snapshot; schedule and status report storage error/paused, run disabled even via direct handler, historical bars and settings retained.",
+  "manual_multiselect": "Native top-layer popover supports 1..16 manual models, select all/clear; empty disables run, POST contains all selected; saved periodic config remains unchanged. A separate history-model filter labels bars continuously.",
+  "periodic_modal": "Native dialog.showModal, 520px/max80vh, scrolling content and fixed footer, collapsed question fields, ESC/backdrop/cancel close and restore focus, explicit Tab containment; current server config is cloned including low effort and new models.",
+  "multimodal_qa": "Four Node suites, full bundle syntax and patch idempotence pass. Root owns one final browser functional QA; no additional screenshot loop here.",
+  "result_modal": "Result detail now shares native modal helper, bounded scrollable content, ESC/backdrop close and clicked-bar focus return; no inline row expansion.",
+  "blocked_history": "History requested_model values supplement failed model directory and empty config. Blocked run is disabled at UI and handler, one-line pause notice replaces duplicate directory/stale-run messages."
+}
