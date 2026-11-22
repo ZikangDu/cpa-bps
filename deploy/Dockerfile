@@ -8,7 +8,7 @@ COPY cpa/go.mod cpa/go.sum ./
 RUN go mod download
 COPY cpa/ ./
 ARG SOURCE_COMMIT=unknown
-RUN CGO_ENABLED=1 go build -trimpath -buildvcs=false -ldflags="-X main.Version=8.0.75-documents.3 -X main.Commit=${SOURCE_COMMIT}" -o /out/CLIProxyAPI ./cmd/server && python3 /collect_notices.py /out/notices
+RUN CGO_ENABLED=1 go build -trimpath -buildvcs=false -ldflags="-X main.Version=8.0.75-bps.4 -X main.Commit=${SOURCE_COMMIT}" -o /out/CLIProxyAPI ./cmd/server && python3 /collect_notices.py /out/notices
 
 FROM ${GO_IMAGE} AS plugin-build
 RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*

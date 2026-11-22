@@ -131,7 +131,10 @@ func currentTextToolPolicy(source map[string]any) string {
 func (b *Bridge) transformTextTool(response map[string]any) error {
 	output, _ := response["output"].([]any)
 	var text strings.Builder
-	for _, raw := range output {
+	var envelope map[string]any
+	envelopeIndex := -1
+	lastTextIndex := -1
+	for index, raw := range output {
 		item := objectValue(raw)
 		if item["type"] == "function_call" || item["type"] == "custom_tool_call" {
 			return relayError("unexpected_native_tool")
@@ -139,21 +142,51 @@ func (b *Bridge) transformTextTool(response map[string]any) error {
 		if item["type"] != "message" {
 			continue
 		}
+		var messageText strings.Builder
+		refused := false
 		parts, _ := item["content"].([]any)
 		for _, part := range parts {
+			refused = refused || objectValue(part)["type"] == "refusal"
 			if objectValue(part)["type"] == "output_text" {
 				content, _ := objectValue(part)["text"].(string)
 				text.WriteString(content)
+				messageText.WriteString(content)
 			}
 		}
+		if strings.TrimSpace(messageText.String()) != "" || refused {
+			lastTextIndex = index
+		}
+		// Commentary and the final tool envelope can be separate messages.
+		// Decode only a complete message, never an arbitrary JSON substring.
+		if candidate, reason := parseRelayObject(messageText.String()); reason == "" && stringValue(candidate["client_tool"]) != "" {
+			if envelope != nil {
+				return relayError("multiple_text_tool_envelopes")
+			}
+			envelope, envelopeIndex = candidate, index
+		}
 	}
-	envelope, reason := parseRelayObject(text.String())
+	// Earlier messages can contain examples or provisional commentary that a
+	// later answer retracts. Only the last text message can request execution.
+	if envelopeIndex >= 0 && envelopeIndex != lastTextIndex {
+		envelope, envelopeIndex = nil, -1
+	}
+	if envelope == nil {
+		// Retain compatibility with responses that split one envelope across
+		// messages. In that case all message text is part of the envelope.
+		envelope, _ = parseRelayObject(text.String())
+	}
 	name := stringValue(envelope["client_tool"])
-	if reason != "" || name == "" {
+	if name == "" {
 		if clientToolCallRequired(b.source) {
 			return relayError("required_tool_choice_not_satisfied")
 		}
 		return nil
+	}
+	// A refusal, hosted action, partial item or contradictory terminal marker
+	// cannot authorize execution, even when another item contains a valid JSON
+	// envelope. Ordinary refusals with no envelope retain their normal output.
+	if _, safe := safeAlternateTerminal(jsonBytes(response), false); !safe {
+		return relayError("unsafe_text_tool_response")
 	}
 	tool, ok := callableClientToolSpecs(b.source)[name]
 	if !ok {
@@ -186,12 +219,17 @@ func (b *Bridge) transformTextTool(response map[string]any) error {
 		return fmt.Errorf("unknown client tool kind")
 	}
 	kept := make([]any, 0, len(output)+1)
-	for _, raw := range output {
-		if objectValue(raw)["type"] != "message" {
+	for index, raw := range output {
+		if index == envelopeIndex {
+			kept = append(kept, item)
+		} else if objectValue(raw)["type"] != "message" || envelopeIndex >= 0 {
 			kept = append(kept, raw)
 		}
 	}
-	response["output"] = append(kept, item)
+	if envelopeIndex < 0 {
+		kept = append(kept, item)
+	}
+	response["output"] = kept
 	return nil
 }
 

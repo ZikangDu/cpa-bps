@@ -145,6 +145,10 @@ func (h *Host) callFromPlugin(ctx context.Context, method string, request []byte
 		return nil, fmt.Errorf("host plugin callback instance is closed")
 	}
 	switch method {
+	case "host.request.open":
+		return h.callHostRequestOpen(ctx, request)
+	case "host.request.wait":
+		return h.callHostRequestWait(ctx, request)
 	case pluginabi.MethodHostDocumentsRead:
 		return h.callHostDocumentRead(ctx, request)
 	case pluginabi.MethodHostModelExecute:

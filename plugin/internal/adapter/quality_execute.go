@@ -144,6 +144,7 @@ func (r *Runtime) runQualityCheck(ctx context.Context, check quality.Check) qual
 		body, readErr = upstream.ReadJSON(response.Body)
 	}
 	if readErr != nil {
+		r.observeStreamQuotaRejection(ctx, cfg, executionRequest{AuthID: entry.ID, StorageJSON: raw}, readErr)
 		return fail("bps_quality_response_incomplete")
 	}
 	if bridge != nil {

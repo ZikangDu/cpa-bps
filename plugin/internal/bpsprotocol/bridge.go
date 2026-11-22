@@ -183,7 +183,7 @@ func (b *Bridge) WrapEmitter(emit func([]byte) error) func([]byte) error {
 		var kind string
 		_ = json.Unmarshal(event["type"], &kind)
 		if kind != "response.completed" && kind != "response.incomplete" {
-			if (b.structured != nil || b.textTools) && kind != "error" && kind != "response.failed" {
+			if (b.structured != nil || b.textTools) && kind != "error" && kind != "response.error" && kind != "response.failed" {
 				return nil
 			}
 			return emit(frame)
@@ -226,9 +226,10 @@ func (c Config) resolveUpstreamModel(model string) (string, bool) {
 }
 
 type Error struct {
-	status  int
-	code    string
-	message string
+	status           int
+	code             string
+	message          string
+	diagnosticReason string
 }
 
 func (e *Error) Error() string   { return e.message }

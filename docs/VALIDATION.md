@@ -43,5 +43,6 @@ python3 -m unittest discover -s deploy -p 'test_*.py'
 
 The document worker does not recalculate formulas or execute macros. Legacy XLS
 returns saved values, not formula source. Large documents have explicit coverage
-limits; unsupported remote URLs are not fetched. Tool buffering does not yet
-propagate client cancellation instantly to every direct upstream operation.
+limits; unsupported remote URLs are not fetched. The 0.5.10 host/plugin lifecycle bridge now propagates client cancellation to
+queue admission and direct upstream operations; old hosts retain their previous
+lifecycle behavior. See [0.5.10 audit](RELEASE-0.5.10.md).

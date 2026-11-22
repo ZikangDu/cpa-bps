@@ -3,6 +3,7 @@ package admission
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime"
 	"testing"
 	"time"
@@ -229,5 +230,109 @@ func assertDrained(t *testing.T, q *Queue) {
 	defer q.mu.Unlock()
 	if len(q.accounts) != 0 {
 		t.Fatalf("retained %d account states after drain", len(q.accounts))
+	}
+}
+
+// Exercise cancellation and a live capacity change while many independent
+// account queues are saturated. Every granted slot must remain releasable and
+// canceled work must never enter the upstream workload.
+func TestSaturatedAccountsCancelAndResizeWithoutLeakingSlots(t *testing.T) {
+	q := New()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	const accounts, initialLimit, waitingPerAccount = 8, 4, 32
+	type pendingRequest struct {
+		cancel context.CancelFunc
+		result <-chan acquisition
+	}
+	initial := make([]func(), 0, accounts*initialLimit)
+	waiting := make([][]pendingRequest, accounts)
+	for accountIndex := range accounts {
+		account := fmt.Sprintf("account-%d", accountIndex)
+		if err := q.SetLimit(account, initialLimit); err != nil {
+			t.Fatal(err)
+		}
+		for range initialLimit {
+			initial = append(initial, mustAcquire(t, q, ctx, account, initialLimit))
+		}
+		for range waitingPerAccount {
+			waitCtx, cancelWaiting := context.WithCancel(ctx)
+			waiting[accountIndex] = append(waiting[accountIndex], pendingRequest{cancelWaiting, acquireAsync(q, waitCtx, account)})
+		}
+		waitForQueued(t, ctx, q, account, waitingPerAccount)
+	}
+	// Cancel half of each saturated queue, including interior waiters.
+	for accountIndex, requests := range waiting {
+		for index, request := range requests {
+			if index%2 == 0 {
+				request.cancel()
+			}
+		}
+		for index, request := range requests {
+			if index%2 != 0 {
+				continue
+			}
+			got := await(t, ctx, request.result)
+			if !errors.Is(got.err, context.Canceled) || got.release != nil {
+				t.Fatalf("account %d canceled waiter %d admitted: %+v", accountIndex, index, got)
+			}
+		}
+		account := fmt.Sprintf("account-%d", accountIndex)
+		if got := q.Snapshot(account, initialLimit); got.Active != initialLimit || got.Waiting != waitingPerAccount/2 {
+			t.Fatalf("cancellation changed another slot: %+v", got)
+		}
+		if err := q.SetLimit(account, 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, release := range initial {
+		release()
+		release()
+	}
+	completed := make(chan error, accounts*waitingPerAccount/2)
+	for accountIndex, requests := range waiting {
+		account := fmt.Sprintf("account-%d", accountIndex)
+		for index, request := range requests {
+			if index%2 == 0 {
+				continue
+			}
+			go func() {
+				defer request.cancel()
+				select {
+				case got := <-request.result:
+					if got.err != nil {
+						completed <- got.err
+						return
+					}
+					snapshot := q.Snapshot(account, initialLimit)
+					got.release()
+					got.release()
+					if snapshot.Active != 1 || snapshot.Limit != 1 {
+						completed <- fmt.Errorf("lowered capacity lost under load: %+v", snapshot)
+						return
+					}
+					completed <- nil
+				case <-ctx.Done():
+					completed <- ctx.Err()
+				}
+			}()
+		}
+	}
+	for range accounts * waitingPerAccount / 2 {
+		select {
+		case err := <-completed:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	assertDrained(t, q)
+	for accountIndex := range accounts {
+		account := fmt.Sprintf("account-%d", accountIndex)
+		if got := q.Snapshot(account, initialLimit); got.Active != 0 || got.Waiting != 0 || got.Limit != 1 {
+			t.Fatalf("drained account lost saved limit: %+v", got)
+		}
 	}
 }

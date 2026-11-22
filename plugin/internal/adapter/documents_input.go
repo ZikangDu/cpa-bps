@@ -45,7 +45,11 @@ func (r *Runtime) prepareDocuments(cfg config, req executionRequest, payload []b
 		_, _ = rand.Read(nonce)
 		scope = "unshared:" + hex.EncodeToString(nonce)
 	}
-	ctx, cancel := context.WithTimeout(r.ctx, 60*time.Second)
+	parent := r.ctx
+	if req.parentContext != nil {
+		parent = req.parentContext
+	}
+	ctx, cancel := context.WithTimeout(parent, 60*time.Second)
 	defer cancel()
 	state := &documentRequest{runtime: r, cfg: cfg, request: req, ctx: ctx, scope: scope, seen: map[string]bool{}}
 	state.images, state.imageBytes = countExistingDocumentImages(body["input"])
@@ -61,7 +65,10 @@ func (r *Runtime) prepareDocuments(cfg config, req executionRequest, payload []b
 		item, _ := json.Marshal(map[string]any{"role": "user", "content": text})
 		input = []json.RawMessage{item}
 	}
-	changed := false
+	input, changed, restoreErr := state.restoreOriginalDocumentHistory(input, req.OriginalRequest)
+	if restoreErr != nil {
+		return nil, documentFailure(restoreErr)
+	}
 	out := make([]json.RawMessage, 0, len(input))
 	for _, raw := range input {
 		var item map[string]json.RawMessage
@@ -124,8 +131,8 @@ func (r *Runtime) prepareDocuments(cfg config, req executionRequest, payload []b
 			changed = true
 		}
 	}
-	// Some host translators omit unsupported document content. Recover only
-	// explicit original document references that were absent after translation.
+	// Top-level attachments have no conversation position. History documents
+	// were restored into their own turn before parsing above.
 	if len(req.OriginalRequest) > 0 {
 		original, originalErr := originalDocuments(req.OriginalRequest)
 		if originalErr != nil && cfg.OAuthPreset == "bps" {
@@ -217,7 +224,7 @@ func (d *documentRequest) supported(raw json.RawMessage) bool {
 	if id != "" {
 		return strings.HasPrefix(id, "file-cpa-doc-")
 	}
-	if strings.HasPrefix(data, "data:application/pdf;") || strings.HasPrefix(data, "data:application/vnd.") || strings.HasPrefix(data, "data:text/csv;") {
+	if strings.HasPrefix(data, "data:application/pdf;") || strings.HasPrefix(data, "data:application/vnd.") || strings.HasPrefix(data, "data:text/csv;") || strings.HasPrefix(data, "data:text/tab-separated-values;") {
 		return true
 	}
 	switch strings.ToLower(filepath.Ext(name)) {
@@ -299,24 +306,6 @@ func originalDocuments(raw []byte) ([]json.RawMessage, error) {
 		return nil, nil
 	}
 	var found []json.RawMessage
-	for _, field := range []string{"input", "messages"} {
-		var items []map[string]json.RawMessage
-		if json.Unmarshal(body[field], &items) != nil {
-			continue
-		}
-		for _, item := range items {
-			for _, name := range []string{"content", "output"} {
-				var parts []json.RawMessage
-				if json.Unmarshal(item[name], &parts) == nil {
-					for _, p := range parts {
-						if isDocumentPart(p) {
-							found = append(found, p)
-						}
-					}
-				}
-			}
-		}
-	}
 	for _, field := range []string{"attachments", "files"} {
 		if len(body[field]) == 0 {
 			continue
@@ -501,6 +490,8 @@ func (d *documentRequest) resolve(raw json.RawMessage) (documentInput, error) {
 			name += ".xls"
 		case "text/csv":
 			name += ".csv"
+		case "text/tab-separated-values":
+			name += ".tsv"
 		}
 	}
 	name = documents.SafeFilename(name)
@@ -539,6 +530,8 @@ func documentFailure(err error) *rpcError {
 		message = "This file is unavailable, expired, or belongs to a different API caller."
 	case "remote_document_requires_upload":
 		message = "Upload the document or include file_data instead of a remote URL."
+	case "document_history_unavailable":
+		message = "The host omitted document content and its original conversation turn could not be recovered. Send the complete Responses history."
 	case "invalid_document_reference", "document_corrupt", "document_format_mismatch", "document_parser_failed":
 	default:
 		code = "bps_document_parser_failed"

@@ -147,6 +147,10 @@ class Suite:
             {'role':'user','content':[{'type':'input_text','text':'Read this spreadsheet.'},{'type':'input_file','file_id':xlsx['id']}]},
             {'role':'assistant','content':[{'type':'output_text','text':ACK}]},
             {'role':'user','content':'Using the same uploaded workbook, state the profit.'}]},marker='DOCUMENT_XLSX_FIXTURE_056')
+        with self.upstream.lock:history=self.upstream.generations[-1]['input']
+        require(len(history)==3 and 'DOCUMENT_XLSX_FIXTURE_056' in json.dumps(history[0])
+                and 'DOCUMENT_XLSX_FIXTURE_056' not in json.dumps(history[-1]),
+                'historical workbook moved from its original turn to the newest question')
         before=self.counts()
         chat={'model':MODEL,'messages':[{'role':'user','content':[{'type':'text','text':'Read this workbook.'},
               {'type':'file','file':{'file_id':xlsx['id']}}]}]}
@@ -171,6 +175,12 @@ class Suite:
 
         for filename,marker,images in [('financials.pdf','DOCUMENT_PDF_FIXTURE_056',0),('scan-financials.pdf',None,1),('mixed-chart.pdf','DOCUMENT_CHART_FIXTURE_056',1),('financials.csv','DOCUMENT_CSV_FIXTURE_056',0),('financials.tsv','DOCUMENT_TSV_FIXTURE_056',0),('financials.xls','Sales',0),('financials.xlsm','DOCUMENT_XLSX_FIXTURE_056',0),('financials.xltx','DOCUMENT_XLSX_FIXTURE_056',0)]:
             file=self.upload(filename);self.request('uploaded_'+filename,[{'type':'input_file','file_id':file['id']}],marker=marker,images=images,stream=filename=='scan-financials.pdf')
+        tsv=base64.b64encode(b'Name, full; display\tAmount, USD; saved\nChicago, IL; USA\t3,200; gross\n').decode()
+        self.request('inline_tsv_mime_punctuation',[{'type':'input_file','file_data':'data:text/tab-separated-values;base64,'+tsv}],marker='Chicago, IL; USA')
+        with self.upstream.lock:tsv_wire=self.upstream.generations[-1]
+        tsv_text='\n'.join(part.get('text','') for item in tsv_wire['input'] for part in item.get('content',[]) if isinstance(part,dict))
+        require('A2: "Chicago, IL; USA"' in tsv_text and 'B2: "3,200; gross"' in tsv_text,
+                'explicit TSV changed cell coordinates or split punctuation inside values')
         pdf_data=base64.b64encode((FIXTURES/'financials.pdf').read_bytes()).decode()
         self.request('inline_pdf',[{'type':'input_file','filename':'financials.pdf','file_data':'data:application/pdf;base64,'+pdf_data}],marker='DOCUMENT_PDF_FIXTURE_056')
         sheet_data=base64.b64encode((FIXTURES/'financials.xlsx').read_bytes()).decode()

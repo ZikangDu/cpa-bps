@@ -85,6 +85,15 @@ func TestNativeRepairRejectsUncertainUnsupportedAndDuplicateCalls(t *testing.T) 
 		{"other protocol", fail(422, "bps_invalid_request", "secret"), nil},
 		{"incomplete", relayError("bad"), func(r map[string]any) { r["status"] = "incomplete" }},
 		{"failed", relayError("bad"), func(r map[string]any) { r["status"] = "failed" }},
+		{"refusal", relayError("bad"), func(r map[string]any) { r["refusal"] = "declined" }},
+		{"incomplete detail", relayError("bad"), func(r map[string]any) { r["incomplete_details"] = map[string]any{"reason": "max_output_tokens"} }},
+		{"executed marker", relayError("bad"), func(r map[string]any) { objectValue(r["output"].([]any)[0])["executed"] = true }},
+		{"tool output marker", relayError("bad"), func(r map[string]any) { objectValue(r["output"].([]any)[0])["output"] = "already completed" }},
+		{"partial call", relayError("bad"), func(r map[string]any) { objectValue(r["output"].([]any)[0])["status"] = "in_progress" }},
+		{"namespaced hosted call", relayError("bad"), func(r map[string]any) { objectValue(r["output"].([]any)[0])["namespace"] = "hosted" }},
+		{"refusal message", relayError("bad"), func(r map[string]any) {
+			r["output"] = append(r["output"].([]any), map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "refusal", "refusal": "declined"}}})
+		}},
 		{"no calls", relayError("bad"), func(r map[string]any) { r["output"] = []any{messageItem("assistant", "no tool")} }},
 		{"direct tool", relayError("bad"), func(r map[string]any) { objectValue(r["output"].([]any)[0])["name"] = "python" }},
 		{"custom tool", relayError("bad"), func(r map[string]any) { objectValue(r["output"].([]any)[0])["type"] = "custom_tool_call" }},

@@ -19,19 +19,20 @@ import (
 const eventStream = "text/event-stream"
 
 type executionRequest struct {
-	AuthID          string
-	AuthProvider    string
-	Model           string
-	SourceFormat    string
-	Format          string
-	Alt             string
-	StorageJSON     []byte
-	Payload         []byte
-	OriginalRequest []byte
-	Metadata        map[string]any
-	StreamID        string `json:"stream_id"`
-	HostCallbackID  string `json:"host_callback_id,omitempty"`
-	parentContext   context.Context
+	AuthID               string
+	AuthProvider         string
+	Model                string
+	SourceFormat         string
+	Format               string
+	Alt                  string
+	StorageJSON          []byte
+	Payload              []byte
+	OriginalRequest      []byte
+	Metadata             map[string]any
+	StreamID             string `json:"stream_id"`
+	HostCallbackID       string `json:"host_callback_id,omitempty"`
+	HostRequestLifecycle bool   `json:"host_request_lifecycle,omitempty"`
+	parentContext        context.Context
 }
 
 func (r *Runtime) execute(raw json.RawMessage, stream bool) (any, error) {
@@ -52,6 +53,18 @@ func (r *Runtime) execute(raw json.RawMessage, stream bool) (any, error) {
 	if !ok {
 		return nil, failure(http.StatusServiceUnavailable, "bps_plugin_unavailable", "BPS plugin is disabled or shutting down")
 	}
+	parent, stopRequest, lifecycleErr := r.requestContext(req)
+	if lifecycleErr != nil {
+		r.tasks.Done()
+		return nil, lifecycleErr
+	}
+	req.parentContext = parent
+	asyncRequest := false
+	defer func() {
+		if !asyncRequest {
+			stopRequest()
+		}
+	}()
 	payload, tools, err := buildPayload(req, cfg, stream)
 	if err != nil {
 		r.tasks.Done()
@@ -93,11 +106,13 @@ func (r *Runtime) execute(raw json.RawMessage, stream bool) (any, error) {
 	finish := func() {
 		response.Body.Close()
 		finishOpen()
+		stopRequest()
 		r.tasks.Done()
 	}
 	mediaType, _, _ := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if stream && mediaType == eventStream {
-		go r.forward(ctx, req.AuthID, req.StreamID, tools, bridge, response, finish)
+		asyncRequest = true
+		go r.forward(ctx, cfg, req, tools, bridge, response, finish)
 		return map[string]any{"headers": http.Header{"Content-Type": {eventStream}}}, nil
 	}
 	defer finish()
@@ -112,6 +127,7 @@ func (r *Runtime) execute(raw json.RawMessage, stream bool) (any, error) {
 		body, readErr = upstream.ReadJSON(response.Body)
 	}
 	if readErr != nil {
+		r.observeStreamQuotaRejection(ctx, cfg, req, readErr)
 		return nil, resultError(ctx, readErr, "bps_stream_interrupted")
 	}
 	if bridge != nil {
@@ -386,8 +402,9 @@ func bpsExecutionAccount(cfg config, raw []byte, token string) string {
 	return accountID
 }
 
-func (r *Runtime) forward(ctx context.Context, authID, streamID string, tools compat.ToolCatalog, bridge *bpsprotocol.Bridge, response *http.Response, finish func()) {
+func (r *Runtime) forward(ctx context.Context, cfg config, req executionRequest, tools compat.ToolCatalog, bridge *bpsprotocol.Bridge, response *http.Response, finish func()) {
 	defer finish()
+	authID, streamID := req.AuthID, req.StreamID
 	var downstreamClosed bool
 	emit := compat.GuardStream(tools, func(frame []byte) error {
 		callErr := r.host("host.stream.emit", map[string]any{"stream_id": streamID, "payload": frame}, nil)
@@ -398,6 +415,7 @@ func (r *Runtime) forward(ctx context.Context, authID, streamID string, tools co
 		emit = bridge.WrapEmitter(emit)
 	}
 	body, err := upstream.ReadEvents(ctx, response.Body, emit)
+	r.observeStreamQuotaRejection(ctx, cfg, req, err)
 	if err == nil && bridge != nil {
 		body, err = bridge.Transform(body)
 	}
@@ -423,12 +441,23 @@ func protocolError(err error) error {
 		StatusCode() int
 	}
 	if errors.As(err, &detail) {
-		return failure(detail.StatusCode(), detail.Code(), "BPS request or response does not satisfy the protocol contract")
+		message := "BPS request or response does not satisfy the protocol contract"
+		var diagnostic interface{ SafeDiagnostic() (string, string) }
+		if errors.As(err, &diagnostic) {
+			if stage, reason := diagnostic.SafeDiagnostic(); stage != "" && reason != "" {
+				message += " (" + stage + ": " + reason + ")"
+			}
+		}
+		return failure(detail.StatusCode(), detail.Code(), message)
 	}
 	return interrupted("bps_protocol_error", "BPS request or response conversion failed")
 }
 
 func resultError(ctx context.Context, err error, publicCode string) *rpcError {
+	var event *upstream.EventRejection
+	if errors.As(err, &event) {
+		return interrupted(event.Diagnostic.Code, event.Diagnostic.Message)
+	}
 	var bpsError *bpsprotocol.Error
 	if errors.As(err, &bpsError) {
 		return interrupted(bpsError.Code(), bpsError.Error())

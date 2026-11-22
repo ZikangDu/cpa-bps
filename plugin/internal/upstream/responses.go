@@ -164,7 +164,25 @@ func (f *eventFrame) dispatch(emit func([]byte) error) (json.RawMessage, error) 
 		if len(response) == 0 || response[0] != '{' {
 			return nil, ErrInvalidEvent
 		}
+		var terminal struct {
+			Status json.RawMessage `json:"status"`
+		}
+		if json.Unmarshal(response, &terminal) != nil {
+			return nil, ErrInvalidEvent
+		}
+		if len(terminal.Status) > 0 {
+			var status string
+			if json.Unmarshal(terminal.Status, &status) != nil || status != strings.TrimPrefix(event.Type, "response.") {
+				// A failed/incomplete event must never authorize a tool call by
+				// carrying a contradictory completed body into buffered paths.
+				return nil, ErrInvalidEvent
+			}
+		}
 		result = event.Response
+	}
+	eventErr := describeEventRejection(data, event.Type)
+	if eventErr != nil {
+		data, result = sanitizeEventRejection(data, event.Type, eventErr.Diagnostic)
 	}
 	if emit != nil {
 		if missingType {
@@ -175,11 +193,16 @@ func (f *eventFrame) dispatch(emit func([]byte) error) (json.RawMessage, error) 
 			}
 		}
 		if err := emit(f.encode(data, event.Type)); err != nil {
+			if eventErr != nil {
+				// The upstream rejection is already definitive even if the
+				// downstream disconnects while receiving its terminal frame.
+				return result, errors.Join(eventErr, err)
+			}
 			return nil, err
 		}
 	}
-	if event.Type == "error" {
-		return nil, ErrUpstreamEvent
+	if eventErr != nil {
+		return result, eventErr
 	}
 	return result, nil
 }

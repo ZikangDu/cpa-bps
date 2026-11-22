@@ -17,7 +17,11 @@ import (
 // The only extra generation is a correction to an unexecuted native relay;
 // transport/HTTP failures leave this loop immediately for normal host policy.
 func (r *Runtime) executeNativeBuffered(cfg config, req executionRequest, payload []byte, tools compat.ToolCatalog, bridge *bpsprotocol.Bridge, stream bool) (any, error) {
-	ctx, cancel := context.WithTimeout(r.ctx, executionWindow)
+	parent := r.ctx
+	if req.parentContext != nil {
+		parent = req.parentContext
+	}
+	ctx, cancel := context.WithTimeout(parent, executionWindow)
 	defer cancel()
 	req.parentContext = ctx
 	transferred := false
@@ -40,6 +44,7 @@ func (r *Runtime) executeNativeBuffered(cfg config, req executionRequest, payloa
 			body, err = upstream.ReadJSON(response.Body)
 		}
 		if err != nil {
+			r.observeStreamQuotaRejection(ctx, cfg, req, err)
 			problem := resultError(ctx, err, "bps_stream_interrupted")
 			response.Body.Close()
 			finish()

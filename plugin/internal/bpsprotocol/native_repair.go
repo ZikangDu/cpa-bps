@@ -26,8 +26,8 @@ func RepairNativePayload(prepared json.RawMessage, response json.RawMessage, cau
 	if why != "" {
 		return nil, false
 	}
-	terminal, why := parseRelayObject(string(response))
-	if why != "" || terminal["status"] != "completed" || terminal["error"] != nil {
+	terminal, safe := safeAlternateTerminal(response, false)
+	if !safe {
 		return nil, false
 	}
 	input, ok := body["input"].([]any)

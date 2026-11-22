@@ -77,6 +77,25 @@ func TestReadEventsTerminalResponses(t *testing.T) {
 	}
 }
 
+func TestReadEventsRejectsContradictoryTerminalStatusBeforeDelivery(t *testing.T) {
+	for _, kind := range []string{"completed", "failed", "incomplete"} {
+		for _, status := range []string{`"completed"`, `"failed"`, `"incomplete"`, `"in_progress"`, `""`, `null`, `429`} {
+			if status == `"`+kind+`"` {
+				continue
+			}
+			raw := `data: {"type":"response.` + kind + `","response":{"status":` + status + `,"output":[{"type":"function_call","name":"run_officejs","call_id":"call-fixture","arguments":"{}"}]}}` + "\n\n"
+			emitted := 0
+			body, err := ReadEvents(context.Background(), strings.NewReader(raw), func([]byte) error {
+				emitted++
+				return nil
+			})
+			if body != nil || !errors.Is(err, ErrInvalidEvent) || emitted != 0 {
+				t.Fatalf("terminal event %s with status %s reached delivery: body=%s err=%v emitted=%d", kind, status, body, err, emitted)
+			}
+		}
+	}
+}
+
 func TestReadEventsTerminalWithoutBlankLine(t *testing.T) {
 	const final = `data: {"type":"response.completed","response":{"id":"resp_eof"}}`
 	for _, ending := range []string{"", "\n", "\r\n"} {

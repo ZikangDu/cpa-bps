@@ -17,9 +17,10 @@ func (a *rpcPluginAdapter) ExecuteStream(ctx context.Context, req pluginapi.Exec
 	callbackID, closeCallback := a.openHostCallbackContext(ctx)
 	cleanup := combinedCleanup(cleanupStream, closeCallback)
 	rpcReq := rpcExecutorRequest{
-		ExecutorRequest: req,
-		StreamID:        streamID,
-		HostCallbackID:  callbackID,
+		ExecutorRequest:      req,
+		HostRequestLifecycle: true,
+		StreamID:             streamID,
+		HostCallbackID:       callbackID,
 	}
 	resp, errCall := callPlugin[rpcExecutorStreamResponse](ctx, a.client, pluginabi.MethodExecutorExecuteStream, rpcReq)
 	if errCall != nil {

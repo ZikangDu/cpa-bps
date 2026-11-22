@@ -155,8 +155,10 @@ func ParseExcel(ctx context.Context, data []byte, format string, limits ExcelLim
 		return out, ErrSpreadsheetLimit
 	}
 	switch strings.ToLower(strings.TrimPrefix(strings.TrimSpace(format), ".")) {
-	case "csv", "tsv", "text/csv", "text/tab-separated-values":
-		return parseCSV(ctx, data, l)
+	case "csv", "text/csv":
+		return parseCSV(ctx, data, l, 0)
+	case "tsv", "text/tab-separated-values":
+		return parseCSV(ctx, data, l, '\t')
 	case "xlsx", "xlsm", "xltx", "xltm", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel.sheet.macroenabled.12":
 		out.Format = "xlsx"
 		if strings.EqualFold(format, "xlsm") || strings.EqualFold(format, ".xlsm") {
@@ -571,8 +573,12 @@ func validCellRange(value string) bool {
 	return true
 }
 
-func parseCSV(ctx context.Context, data []byte, l ExcelLimits) (Spreadsheet, error) {
+func parseCSV(ctx context.Context, data []byte, l ExcelLimits, delimiter rune) (Spreadsheet, error) {
 	out := Spreadsheet{Format: "csv", TotalSheets: 1, Sheets: []SpreadsheetSheet{{Name: "CSV", Visibility: "visible", Cells: []SpreadsheetCell{}}}}
+	if delimiter == '\t' {
+		out.Format = "tsv"
+		out.Sheets[0].Name = "TSV"
+	}
 	if bytes.HasPrefix(data, []byte{0xef, 0xbb, 0xbf}) {
 		data = data[3:]
 	}
@@ -590,25 +596,29 @@ func parseCSV(ctx context.Context, data []byte, l ExcelLimits) (Spreadsheet, err
 		data = decoded
 		spreadsheetWarning(&out, "CSV was decoded as GB18030 because it was not UTF-8.")
 	}
-	delimiter := ','
 	// Prefer the separator with a stable multi-field first record. The reader
 	// validates every subsequent record rather than splitting quoted strings.
+	// An explicit TSV format already fixes its separator, even when cells have
+	// commas or semicolons that would otherwise win this heuristic.
 	type candidate struct {
 		separator rune
 		fields    int
 	}
 	candidates := []candidate{}
-	for _, sep := range []rune{',', '\t', ';'} {
-		r := csv.NewReader(bytes.NewReader(data))
-		r.Comma = sep
-		r.FieldsPerRecord = -1
-		if row, err := r.Read(); err == nil && len(row) > 1 {
-			candidates = append(candidates, candidate{sep, len(row)})
+	if delimiter == 0 {
+		delimiter = ','
+		for _, sep := range []rune{',', '\t', ';'} {
+			r := csv.NewReader(bytes.NewReader(data))
+			r.Comma = sep
+			r.FieldsPerRecord = -1
+			if row, err := r.Read(); err == nil && len(row) > 1 {
+				candidates = append(candidates, candidate{sep, len(row)})
+			}
 		}
-	}
-	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].fields > candidates[j].fields })
-	if len(candidates) > 0 {
-		delimiter = candidates[0].separator
+		sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].fields > candidates[j].fields })
+		if len(candidates) > 0 {
+			delimiter = candidates[0].separator
+		}
 	}
 	reader := csv.NewReader(bytes.NewReader(data))
 	reader.Comma = delimiter

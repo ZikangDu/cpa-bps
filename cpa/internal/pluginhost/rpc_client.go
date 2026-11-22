@@ -657,8 +657,9 @@ func (a *rpcPluginAdapter) Execute(ctx context.Context, req pluginapi.ExecutorRe
 	callbackID, closeCallback := a.openHostCallbackContext(ctx)
 	defer closeCallback()
 	return callPlugin[pluginapi.ExecutorResponse](ctx, a.client, pluginabi.MethodExecutorExecute, rpcExecutorRequest{
-		ExecutorRequest: req,
-		HostCallbackID:  callbackID,
+		ExecutorRequest:      req,
+		HostRequestLifecycle: true,
+		HostCallbackID:       callbackID,
 	})
 }
 

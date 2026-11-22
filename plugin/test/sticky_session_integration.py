@@ -34,7 +34,7 @@ TOKENS = {"account_A": "fixture-sticky-token-A", "account_B": "fixture-sticky-to
 TOKEN_ENVS = {label: "CPA_BPS_STICKY_" + label[-1] for label in TOKENS}
 REQUEST_PATTERN = re.compile(r"FIXTURE_REQ_([a-z0-9_]+)")
 MAX_BODY = 1 << 20
-CONCURRENT_REQUESTS = 4
+DEFAULT_CONCURRENT_REQUESTS = 4
 
 
 class Fixture(http.server.BaseHTTPRequestHandler):
@@ -80,7 +80,7 @@ class Fixture(http.server.BaseHTTPRequestHandler):
             if gated:
                 self.server.active += 1
                 self.server.peak_active = max(self.server.peak_active, self.server.active)
-                if self.server.active == CONCURRENT_REQUESTS:
+                if self.server.active == self.server.concurrent_requests:
                     self.server.parallel_entered.set()
         try:
             if gated and not self.server.release_parallel.wait(10):
@@ -154,6 +154,7 @@ class Suite:
     def __init__(self, port, upstream, management_key, mode, rebind_on):
         self.port, self.upstream, self.key, self.mode = port, upstream, management_key, mode
         self.rebind_on = rebind_on
+        self.concurrent_requests = upstream.concurrent_requests
         self.reports = []
         self.session = "fixture-session-" + secrets.token_hex(8)
         self.history = []
@@ -228,16 +229,16 @@ class Suite:
             new_owners.add(owner)
         require(new_owners == set(TOKENS), "fresh sessions did not distribute across both accounts")
 
-        # All four requests must be in the real upstream simultaneously.
-        with ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as pool:
+        # All configured requests must be in the real upstream simultaneously.
+        with ThreadPoolExecutor(max_workers=self.concurrent_requests) as pool:
             futures = [pool.submit(self.success, "parallel_" + str(index), history=self.history, stream=True)
-                       for index in range(CONCURRENT_REQUESTS)]
+                       for index in range(self.concurrent_requests)]
             try:
                 entered = self.upstream.parallel_entered.wait(10)
             finally:
                 self.upstream.release_parallel.set()
             results = [future.result(timeout=20) for future in futures]
-        require(entered and self.upstream.peak_active == CONCURRENT_REQUESTS,
+        require(entered and self.upstream.peak_active == self.concurrent_requests,
                 "same-session requests were not simultaneously active upstream")
         require(all(owner == self.owner for owner, _ in results), "concurrent same-session requests changed accounts")
 
@@ -274,7 +275,7 @@ class Suite:
         require(all(count == 1 for count in counts.values()), "automatic upstream replay detected")
         return {
             "passed": True, "session_field": self.mode, "rebind_on": self.rebind_on, "six_turn_owner": self.owner,
-            "fresh_sessions_use_both_accounts": True, "concurrent_same_session": CONCURRENT_REQUESTS,
+            "fresh_sessions_use_both_accounts": True, "concurrent_same_session": self.concurrent_requests,
             "strict_disabled_binding": True, "strict_503_binding": True,
             "successful_requests_replayed": 0, "upstream_generations": sum(counts.values()),
             "requests": self.reports,
@@ -321,7 +322,7 @@ class Suite:
         return {
             "passed": True, "session_field": self.mode, "rebind_on": self.rebind_on,
             "six_turn_owner": self.owner, "fresh_sessions_use_both_accounts": True,
-            "concurrent_same_session": CONCURRENT_REQUESTS, "503_failover_attempts": 2,
+            "concurrent_same_session": self.concurrent_requests, "503_failover_attempts": 2,
             "rebound_preserved_after_recovery": True, "disabled_binding_switches": True,
             "successful_requests_replayed": 0, "partial_stream_replayed": False,
             "upstream_generations": sum(counts.values()), "requests": self.reports,
@@ -341,14 +342,21 @@ def ready(process, port):
     raise RuntimeError("isolated CPA did not become ready")
 
 
-def run(cpa, plugin, mode, rebind_on):
+class ConcurrentFixtureServer(http.server.ThreadingHTTPServer):
+    # A small TCP listen backlog would test the fixture accept queue instead of
+    # the plugin when dozens of connections arrive together.
+    request_queue_size = 128
+
+
+def run(cpa, plugin, mode, rebind_on, concurrency=DEFAULT_CONCURRENT_REQUESTS):
     with tempfile.TemporaryDirectory(prefix="cpa-bps-sticky-") as workdir:
         root = pathlib.Path(workdir)
         auths, plugins = root / "auths", root / "plugins"
         auths.mkdir(mode=0o700)
         plugins.mkdir(mode=0o700)
         shutil.copy2(plugin, plugins / ("cpa-bps" + plugin.suffix))
-        with http.server.ThreadingHTTPServer((LOOPBACK, 0), Fixture) as upstream:
+        with ConcurrentFixtureServer((LOOPBACK, 0), Fixture) as upstream:
+            upstream.concurrent_requests = concurrency
             upstream.lock = threading.Lock()
             upstream.requests = []
             upstream.active = upstream.peak_active = 0
@@ -375,7 +383,7 @@ def run(cpa, plugin, mode, rebind_on):
                 "plugins": {"enabled": True, "dir": str(plugins), "configs": {"cpa-bps": {
                     "enabled": True, "responses_url": origin + "/v1/responses",
                     "models": [{"name": UPSTREAM_MODEL, "alias": MODEL}],
-                    "account_concurrency_limit": CONCURRENT_REQUESTS,
+                    "account_concurrency_limit": concurrency,
                 }}},
             }
             config_path = root / "config.yaml"
@@ -427,23 +435,27 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cpa", type=pathlib.Path, required=True)
     parser.add_argument("--plugin", type=pathlib.Path, required=True)
+    parser.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENT_REQUESTS,
+                        help="simultaneous same-session upstream requests (1–128)")
     parser.add_argument("--rebind-on", choices=("any", "never"), default="any")
     parser.add_argument("--evidence", type=pathlib.Path, help="write a new JSON evidence file after both modes finish")
     args = parser.parse_args()
+    if not 1 <= args.concurrency <= 128:
+        parser.error("concurrency must be from 1 to 128")
     cpa, plugin = args.cpa.resolve(strict=True), args.plugin.resolve(strict=True)
     if args.evidence is not None and args.evidence.exists():
         parser.error("the evidence file already exists; choose a new path")
     evidence = {
         "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "passed": False, "synthetic_loopback_only": True, "rebind_on": args.rebind_on,
-        "session_affinity_ttl": "24h", "request_retry": 0, "max_retry_credentials": 2,
+        "concurrency": args.concurrency, "session_affinity_ttl": "24h", "request_retry": 0, "max_retry_credentials": 2,
         "plugin_sha256": hashlib.sha256(plugin.read_bytes()).hexdigest(),
         "cpa_sha256": hashlib.sha256(cpa.read_bytes()).hexdigest(), "runs": [],
     }
     previous = signal.signal(signal.SIGTERM, interrupted)
     try:
         for mode in ("prompt_cache_key", "header"):
-            evidence["runs"].append(run(cpa, plugin, mode, args.rebind_on))
+            evidence["runs"].append(run(cpa, plugin, mode, args.rebind_on, args.concurrency))
         evidence["passed"] = all(result["passed"] and result["isolated_process_cleaned_up"]
                                  for result in evidence["runs"])
     finally:

@@ -179,3 +179,15 @@ func TestOriginalMalformedAttachmentCannotDisappearAndSingleObjectWorks(t *testi
 		t.Fatal("single-object attachment not parsed", err)
 	}
 }
+
+func TestTSVDocumentDataURIDoesNotRequireFilename(t *testing.T) {
+	d := &documentRequest{}
+	raw, _ := json.Marshal(map[string]string{"type": "input_file", "file_data": "data:text/tab-separated-values;base64," + base64.StdEncoding.EncodeToString([]byte("A\tB\n1\t2"))})
+	if !d.supported(raw) {
+		t.Fatal("TSV MIME reference was not recognized")
+	}
+	file, err := d.resolve(raw)
+	if err != nil || file.Filename != "document.tsv" || string(file.Data) != "A\tB\n1\t2" {
+		t.Fatalf("TSV MIME reference lost its format: %#v, %v", file, err)
+	}
+}

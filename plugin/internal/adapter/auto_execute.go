@@ -19,7 +19,11 @@ const maxAutomaticAttempts = 3
 // fallback only regenerates a demonstrably unexecuted protocol failure, never
 // a request whose transport, permission, quota, or execution outcome is unclear.
 func (r *Runtime) executeAutoBuffered(cfg config, req executionRequest, source []byte, tools compat.ToolCatalog, binding [32]byte, mode string, stream bool) (any, error) {
-	ctx, cancel := context.WithTimeout(r.ctx, executionWindow)
+	parent := r.ctx
+	if req.parentContext != nil {
+		parent = req.parentContext
+	}
+	ctx, cancel := context.WithTimeout(parent, executionWindow)
 	defer cancel()
 	req.parentContext = ctx
 	transferred := false
@@ -52,6 +56,7 @@ func (r *Runtime) executeAutoBuffered(cfg config, req executionRequest, source [
 			body, err = upstream.ReadJSON(response.Body)
 		}
 		if err != nil {
+			r.observeStreamQuotaRejection(readCtx, cfg, req, err)
 			problem := resultError(readCtx, err, "bps_stream_interrupted")
 			response.Body.Close()
 			finish()

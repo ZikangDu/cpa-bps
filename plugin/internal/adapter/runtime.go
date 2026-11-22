@@ -16,7 +16,7 @@ import (
 
 const (
 	provider        = "cpa-bps"
-	version         = "0.5.9-reconstructed"
+	version         = "0.5.10-reconstructed"
 	schemaVersion   = 6
 	executionWindow = 600 * time.Second
 	discoveryWindow = 5 * time.Second

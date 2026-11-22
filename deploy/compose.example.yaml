@@ -1,7 +1,7 @@
 name: cpa-bps
 services:
   cli-proxy-api:
-    image: local/cpa-bps-rebuilt-api:0.5.9
+    image: local/cpa-bps-rebuilt-api:0.5.10
     container_name: cpa-bps-api
     restart: unless-stopped
     pull_policy: never
@@ -18,7 +18,7 @@ services:
       - ./rebuild-state:/var/lib/cpa-bps
       - ./document-files:/var/lib/cpa-documents
   cpa-manager-plus:
-    image: local/cpa-bps-rebuilt-manager:0.5.9
+    image: local/cpa-bps-rebuilt-manager:0.5.10
     container_name: cpa-bps-manager
     restart: unless-stopped
     pull_policy: never

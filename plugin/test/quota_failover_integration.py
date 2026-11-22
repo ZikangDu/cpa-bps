@@ -41,6 +41,13 @@ def utc_time(epoch):
     return datetime.fromtimestamp(epoch, timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+class ConcurrentFixtureServer(http.server.ThreadingHTTPServer):
+    # Account failover opens a burst of fresh connections. Keep the synthetic
+    # server accept backlog above the burst so kernel resets cannot masquerade
+    # as plugin transport failures.
+    request_queue_size = 128
+
+
 class Fixture(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -359,7 +366,7 @@ def run(cpa, plugin, *, three_account_pool=False, parallel_failover=False, max_r
         shutil.copy2(plugin, plugins / ("cpa-bps" + plugin.suffix))
         tokens = {**TOKENS, "account_C": "fixture-quota-token-C"} if three_account_pool else TOKENS
         token_envs = {label: "CPA_BPS_QUOTA_" + label[-1] for label in tokens}
-        with http.server.ThreadingHTTPServer((LOOPBACK, 0), Fixture) as fixture:
+        with ConcurrentFixtureServer((LOOPBACK, 0), Fixture) as fixture:
             fixture.tokens = tokens
             fixture.lock = threading.Lock()
             fixture.generations, fixture.quota_reads = [], []

@@ -97,8 +97,9 @@ type rpcAuthModelRequest struct {
 
 type rpcExecutorRequest struct {
 	pluginapi.ExecutorRequest
-	StreamID       string `json:"stream_id,omitempty"`
-	HostCallbackID string `json:"host_callback_id,omitempty"`
+	StreamID             string `json:"stream_id,omitempty"`
+	HostCallbackID       string `json:"host_callback_id,omitempty"`
+	HostRequestLifecycle bool   `json:"host_request_lifecycle,omitempty"`
 }
 
 type rpcExecutorHTTPRequest struct {

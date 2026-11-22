@@ -9,7 +9,7 @@ import argparse,datetime,hashlib,ipaddress,json,os,pathlib,shutil,subprocess,tem
 import yaml
 import migrate_credentials
 
-VERSION='0.5.9-reconstructed'
+VERSION='0.5.10-reconstructed'
 
 def write(path,value,mode=0o600):
     path=pathlib.Path(path);path.parent.mkdir(parents=True,exist_ok=True)

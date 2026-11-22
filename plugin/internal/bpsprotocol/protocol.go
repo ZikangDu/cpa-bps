@@ -235,7 +235,8 @@ func clientToolProtocolReminder(source map[string]any) string {
 		}
 	}
 	reminder := toolCatalogReminder + " " + functionRelayEncoding + " Client tools: " + strings.Join(names, ", ") + "."
-	for name, spec := range specs {
+	for _, name := range names {
+		spec := specs[name]
 		if spec.Type == "custom" {
 			reminder += " Custom tool " + name + " uses summary=codex2api.custom/" + name + " and the exact input in code."
 		}
@@ -504,7 +505,7 @@ func conversationFingerprint(items []any) string {
 
 func turnState(rawInput any) (string, string) {
 	items, ok := rawInput.([]any)
-	if !ok {
+	if !ok || len(items) == 0 {
 		return shortHash(string(jsonBytes(rawInput))), "1"
 	}
 	lastUser := -1
@@ -762,10 +763,12 @@ func parseRelayObject(value any) (map[string]any, string) {
 
 func relayError(reason string) error {
 	// CPA v7.3.17 的 JSON ABI 没有 request-scoped 标志；422 不会冷却凭据。
-	return fail(422, "invalid_tool_call", "Basis Points returned an invalid client tool relay: "+reason)
+	return &Error{status: 422, code: "invalid_tool_call",
+		message:          "Basis Points returned an invalid client tool relay: " + reason,
+		diagnosticReason: safeRelayReason(reason)}
 }
 
-func transportEnvelope(native map[string]any) (map[string]any, error) {
+func transportEnvelope(native map[string]any, declared map[string]toolSpec) (map[string]any, error) {
 	if stringValue(native["type"]) != "function_call" || !isTransportName(stringValue(native["name"])) {
 		return nil, relayError("outer_not_transport")
 	}
@@ -806,15 +809,23 @@ func transportEnvelope(native map[string]any) (map[string]any, error) {
 		}
 		return map[string]any{"tool": name, "args": code, "kind": "custom"}, nil
 	}
-	// The legacy route is explicit, including when raw custom input resembles JSON.
+	// A legacy selector must name a declared tool. Native references may also
+	// contain filenames or workbook references; those must not override an
+	// explicit name/arguments envelope. Keep declared selectors authoritative
+	// so raw custom JSON and conflicting tool names remain unambiguous.
 	if references, ok := arguments["references"].([]any); ok && len(references) == 1 {
 		if name, ok := references[0].(string); ok && validRelayName(name) {
-			return map[string]any{"tool": name, "args": code, "legacy_reference": true}, nil
+			if _, legacy := declared[name]; legacy {
+				return map[string]any{"tool": name, "args": code, "legacy_reference": true}, nil
+			}
 		}
 	}
 	if envelope, reason := parseRelayObject(code); reason == "" {
 		if name, ok := envelope["name"].(string); ok && validRelayName(name) {
-			if arguments, ok := envelope["arguments"].(map[string]any); ok && len(envelope) == 2 {
+			// The original relay accepts both an arguments object and its
+			// JSON string representation. Decode exactly one object; the
+			// declared function schema is still enforced before delivery.
+			if arguments, reason := parseRelayObject(envelope["arguments"]); reason == "" && len(envelope) == 2 {
 				return map[string]any{"tool": name, "args": arguments, "kind": "function"}, nil
 			}
 			if input, ok := envelope["input"].(string); ok && len(envelope) == 2 {
@@ -946,7 +957,7 @@ func extractNativeClientToolCallIn(native map[string]any, callable, declared map
 	if !isTransportName(stringValue(native["name"])) {
 		return directClientCall(native, callable)
 	}
-	inner, err := transportEnvelope(native)
+	inner, err := transportEnvelope(native, declared)
 	if err != nil {
 		return nil, err
 	}
@@ -1002,8 +1013,8 @@ func extractNativeClientToolCallIn(native map[string]any, callable, declared map
 				// legitimate function with name/arguments fields must stay intact.
 				if inner["legacy_reference"] == true && len(parsed) == 2 {
 					envelopeName, named := parsed["name"].(string)
-					envelopeArgs, object := parsed["arguments"].(map[string]any)
-					if named && object {
+					envelopeArgs, reason := parseRelayObject(parsed["arguments"])
+					if named && reason == "" {
 						if envelopeName != name {
 							return nil, relayError("conflicting_tool_reference")
 						}

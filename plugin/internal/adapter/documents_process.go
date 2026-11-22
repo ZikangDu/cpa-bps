@@ -19,6 +19,7 @@ import (
 const documentProcessWindow = 45 * time.Second
 const documentCacheTTL = 5 * time.Minute
 const documentCacheBytes = 64 << 20
+const maxDocumentOwnerHandoffs = 1
 
 type documentFlight struct {
 	done    chan struct{}
@@ -51,12 +52,22 @@ func (b *documentOutput) Write(raw []byte) (int, error) {
 }
 
 func (p *documentProcesses) parse(ctx context.Context, worker, python, scope string, job documents.Job) (documents.Result, error) {
+	return p.parseWithWorker(ctx, worker, python, scope, job, runDocumentWorker)
+}
+
+func (p *documentProcesses) parseWithWorker(ctx context.Context, worker, python, scope string, job documents.Job, run func(context.Context, string, string, documents.Job) (documents.Result, error)) (documents.Result, error) {
 	// No OAuth credential participates in this key: an account failover must not
 	// parse the same user's immutable file again. Callers remain isolated.
 	digest := sha256.Sum256(job.Data)
 	identity, _ := json.Marshal([]any{"doc-v1", scope, job.Filename, digest, worker, python})
 	key := sha256.Sum256(identity)
+	handoffs := 0
+retry:
 	p.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		p.mu.Unlock()
+		return documents.Result{}, err
+	}
 	now := time.Now()
 	for k, v := range p.entries {
 		select {
@@ -72,6 +83,15 @@ func (p *documentProcesses) parse(ctx context.Context, worker, python, scope str
 		p.mu.Unlock()
 		select {
 		case <-old.done:
+			if err := ctx.Err(); err != nil {
+				return documents.Result{}, err
+			}
+			// A parser belongs to its initiating request. One live waiter may
+			// replace a canceled owner; the replacement is still deduplicated.
+			if handoffs < maxDocumentOwnerHandoffs && (errors.Is(old.err, context.Canceled) || errors.Is(old.err, context.DeadlineExceeded)) {
+				handoffs++
+				goto retry
+			}
 			return old.result, old.err
 		case <-ctx.Done():
 			return documents.Result{}, ctx.Err()
@@ -107,11 +127,17 @@ func (p *documentProcesses) parse(ctx context.Context, worker, python, scope str
 		next.err = ctx.Err()
 	}
 	if next.err == nil {
-		next.result, next.err = runDocumentWorker(ctx, worker, python, job)
+		if next.err = ctx.Err(); next.err == nil {
+			next.result, next.err = run(ctx, worker, python, job)
+		}
 		<-p.slots
+	}
+	if err := ctx.Err(); err != nil {
+		next.result, next.err = documents.Result{}, err
 	}
 	next.expires = time.Now().Add(documentCacheTTL)
 	if next.err != nil {
+		next.result = documents.Result{}
 		next.expires = time.Now().Add(5 * time.Second)
 	}
 	next.bytes = len(next.result.Text)
@@ -120,6 +146,11 @@ func (p *documentProcesses) parse(ctx context.Context, worker, python, scope str
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if errors.Is(next.err, context.Canceled) || errors.Is(next.err, context.DeadlineExceeded) {
+		// A request's cancellation is not a property of the document and must
+		// not poison retries or concurrent callers with an error cache entry.
+		delete(p.entries, key)
+	}
 	close(next.done)
 	if next.err == nil && next.bytes <= documentCacheBytes {
 		for p.size+next.bytes > documentCacheBytes {
@@ -185,6 +216,9 @@ func runDocumentWorker(ctx context.Context, worker, python string, job documents
 	command.Stderr = stderr
 	command.WaitDelay = time.Second
 	if err := command.Run(); err != nil {
+		if ctx.Err() != nil {
+			return documents.Result{}, ctx.Err()
+		}
 		if readCtx.Err() != nil {
 			return documents.Result{}, errors.New("document_processing_timeout")
 		}

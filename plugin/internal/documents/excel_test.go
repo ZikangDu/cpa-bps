@@ -291,6 +291,27 @@ func TestExcelCancellationCorruptionAndOutputBounds(t *testing.T) {
 	}
 }
 
+func TestTSVHonorsExplicitSeparatorWithCommaRichCells(t *testing.T) {
+	source := []byte("Name, full; display\tAmount, USD; saved\nChicago, IL; USA\t3,200; gross\n")
+	for _, format := range []string{"tsv", ".tsv", "text/tab-separated-values"} {
+		t.Run(format, func(t *testing.T) {
+			got, err := ParseExcel(context.Background(), source, format, ExcelLimits{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Format != "tsv" || got.ParsedCells != 4 {
+				t.Fatalf("explicit TSV was parsed as %s with %d cells", got.Format, got.ParsedCells)
+			}
+			if cell := findSpreadsheetCell(t, got, "TSV", "A2"); cell.Value != "Chicago, IL; USA" {
+				t.Fatal("first TSV cell split at punctuation", cell)
+			}
+			if cell := findSpreadsheetCell(t, got, "TSV", "B2"); cell.Value != "3,200; gross" {
+				t.Fatal("second TSV cell split at punctuation", cell)
+			}
+		})
+	}
+}
+
 func TestExcelSparseSharedStringsAreResolved(t *testing.T) {
 	raw := workbookFixture(t)
 	var sheetName string
