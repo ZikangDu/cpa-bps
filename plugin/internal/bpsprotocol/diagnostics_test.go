@@ -7,6 +7,9 @@ func TestSafeProtocolDiagnosticsContainOnlyCategories(t *testing.T) {
 		input, want string
 	}{
 		{"required_tool_choice_not_satisfied", "required_tool_choice_not_satisfied"},
+		{"unsafe_text_tool_response", "unsafe_text_tool_response"},
+		{"multiple_text_tool_envelopes", "multiple_text_tool_envelopes"},
+		{"unexpected_native_tool", "unexpected_native_tool"},
 		{"arguments_schema_mismatch private-schema-value", "arguments_schema_mismatch"},
 		{"outer_arguments invalid_json byte_offset=123 private-data", "outer_arguments_invalid"},
 		{"code invalid_json byte_offset=123 private-data", "function_arguments_invalid"},

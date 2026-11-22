@@ -30,12 +30,20 @@ on upstream HTTP 403; it is not marked passed.
 
 ## Automatic request routing in 0.5.5
 
-`bps_tool_transport: auto` is now the default. Ordinary text, image and JSON-only
-requests retain the lightweight streaming path. Simple functions initially use
-text tools; code/command, custom, namespaced and multiple-tool requests initially
-use native tools. The decision uses declared request structure, not prompt
-keywords. A successful mode is remembered per account, caller, model, conversation
-and tool capability family. A different request family is evaluated afresh.
+`bps_tool_transport: auto` has been the default since 0.5.5. Ordinary text, image
+and JSON-only requests retain the lightweight streaming path. Starting in
+0.5.10, every request with callable client tools initially uses the original
+native tool transport, including single optional functions. Real model tests
+found that text transport can invoke unrelated hosted tools even for a simple
+function. Such uncertain responses are rejected without regeneration.
+
+Requests with no callable tools, including `tool_choice: none`, initially use
+text transport. Tool history is retained and its complete response remains
+validated before delivery. The decision uses declared request structure, not
+prompt keywords or model-name exceptions. A successful mode is remembered per
+account, caller, model, conversation, tool capability family and tool-choice
+requirement. Required, optional and no-callable-tool requests have separate
+bindings; a different request contract is evaluated afresh.
 
 Complete tool responses are validated before delivery. Alternate local decoding
 first tries to interpret the same response without another generation. Only a

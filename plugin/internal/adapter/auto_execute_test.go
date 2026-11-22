@@ -64,6 +64,16 @@ func TestAutoTransportFallbackAndStableBinding(t *testing.T) {
 			}))
 			source := autoSource(nativeFirst)
 			req := executionRequest{AuthID: "fixture-id", AuthProvider: provider, Model: "fixture", StorageJSON: auth, Payload: source}
+			if !nativeFirst {
+				// A successful required-call text fallback can be reused. Seed
+				// that established mode to retain text-to-native retry coverage;
+				// an unseen required request now starts with native transport.
+				_, key, _, err := r.selectAutoTransport(req, r.cfg, source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				r.transports.learn(key, "text")
+			}
 			raw, _ := json.Marshal(req)
 			reply, err := r.execute(raw, false)
 			if err != nil {
@@ -155,6 +165,48 @@ func TestAutoNoFallbackOnUncertainOrRejectedExecution(t *testing.T) {
 				t.Fatal("automatic failure leaked slot")
 			}
 		})
+	}
+}
+
+func TestAutoSingleFunctionUsesNativeWithoutRetryingHostedCalls(t *testing.T) {
+	for _, choice := range []string{"auto", "required"} {
+		for _, hosted := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/hosted=%v", choice, hosted), func(t *testing.T) {
+				r, _, auth := quotaFixture(t)
+				r.cfg.BPSToolTransport = "auto"
+				calls := 0
+				r.client = upstream.NewWithTransport(qualityMemoryTransport(func(req *http.Request) (*http.Response, error) {
+					if req.Method == http.MethodGet {
+						if strings.HasSuffix(req.URL.Path, "/usage") {
+							return qualityResponseFixture(200, `{"rate_limit":{"primary_window":{"used_percent":1}}}`, false), nil
+						}
+						return qualityResponseFixture(200, `{"available_count":0}`, false), nil
+					}
+					calls++
+					if req.Header.Get("X-OpenAI-Internal-Basispoints-Client-Agent-Profile") != "excel" {
+						t.Fatal("single callable function did not use the native upstream profile")
+					}
+					output := autoNative("lookup", `{"q":"ok"}`)
+					if hosted {
+						output = []any{map[string]any{"type": "function_call", "name": "list_skills", "call_id": "call_hosted", "id": "fc_hosted", "arguments": `{"limit":3}`, "status": "completed"}}
+					}
+					return qualityResponseFixture(200, autoResponse("", output, 5), false), nil
+				}))
+				var source map[string]any
+				_ = json.Unmarshal(autoSource(false), &source)
+				source["tool_choice"] = choice
+				payload, _ := json.Marshal(source)
+				req := executionRequest{AuthID: "fixture-id", AuthProvider: provider, Model: "fixture", StorageJSON: auth, Payload: payload}
+				raw, _ := json.Marshal(req)
+				reply, err := r.execute(raw, false)
+				if calls != 1 || (err != nil) != hosted {
+					t.Fatalf("single function or unsafe hosted-call handling changed: calls=%d err=%v", calls, err)
+				}
+				if !hosted && !strings.Contains(string(reply.(map[string]any)["Payload"].([]byte)), `"name":"lookup"`) {
+					t.Fatal("native result did not become the declared client function")
+				}
+			})
+		}
 	}
 }
 func TestAutoStreamDeliversOnlyFinalValidatedCall(t *testing.T) {

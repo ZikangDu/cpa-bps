@@ -219,12 +219,33 @@ func profileTransportRequest(body map[string]any) transportRequestProfile {
 	}
 	parallel, explicitParallel := body["parallel_tool_calls"].(bool)
 	profile.family = transportCapabilityClass(classification, explicitParallel && parallel)
-	profile.preferNative = profile.family != "simple_function"
-	if profile.family == "multi_function" && explicitParallel && !parallel {
-		profile.preferNative = false
+	// Every callable client tool starts on the original native transport.
+	// Some upstream models ignore text envelopes and invoke hosted tools even
+	// for one optional function; such uncertain output cannot be retried.
+	profile.preferNative = len(callable) > 0
+	if len(callable) == 0 {
+		profile.family += "/no_callable_tools"
+	} else if transportToolCallRequired(body) {
+		// Optional text successes do not establish required-call capability.
+		profile.family += "/required"
 	}
 
 	return profile
+}
+
+func transportToolCallRequired(body map[string]any) bool {
+	if transportText(body["tool_choice"]) == "required" {
+		return true
+	}
+	choice := transportMap(body["tool_choice"])
+	switch transportText(choice["type"]) {
+	case "function", "custom":
+		return true
+	case "allowed_tools":
+		return transportText(choice["mode"]) == "required"
+	default:
+		return false
+	}
 }
 
 func transportCapabilityKey(conversation [32]byte, family string) [32]byte {
@@ -232,8 +253,8 @@ func transportCapabilityKey(conversation [32]byte, family string) [32]byte {
 	return sha256.Sum256(raw)
 }
 
-// Higher-ranked capabilities determine a mixed catalog's stable family. The
-// family influences first choice; learned success is reused only within it.
+// Higher-ranked capabilities determine a mixed catalog's stable family.
+// Learned success is reused only within that family and tool-choice contract.
 func transportCapabilityClass(tools map[string]transportTool, explicitParallel bool) string {
 	custom, code, namespaced := false, false, false
 	for _, tool := range tools {

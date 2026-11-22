@@ -25,7 +25,7 @@ plugins:
       auto_discover: true
       model_suffix: ""
       fast_mode: false
-      # Automatically select the tool protocol; no per-request manual switching.
+      # Callable tools start native; no-callable requests start text. Safe fallback is bounded.
       bps_tool_transport: auto
       # Installed by the local document-runtime setup; users submit files normally.
       document_worker_path: ./plugins/bps-document-worker

@@ -26,9 +26,11 @@ configuration, executable, credential, or workbook was modified.
 
 ## Deliberate differences and limits
 
-- `auto` is the default from 0.5.5: request capability selects the initial
-  protocol, with same-family success reuse and bounded compatibility fallback.
-  Native relay support does not imply server-side workbook access.
+- `auto` is the default from 0.5.5. Starting in 0.5.10, all callable client tools
+  initially use the original native protocol; requests with no callable tools
+  initially use text. Success reuse is isolated by capability family and by
+  required, optional or no-callable-tool policy, with bounded compatibility
+  fallback. Native relay support does not imply server-side workbook access.
 - Native format correction is optional (`native_tool_repair_attempts: 0..2`).
   With zero corrections, invalid tool responses fail immediately; the original
   may send correction requests. Duplicate identifiers, malformed opaque content,
@@ -62,9 +64,11 @@ in the evidence; the final suite passed.
 ## Automatic transport in 0.5.5
 
 Ordinary text/image/structured requests without client tools retain the normal
-streaming path. Tool capability families select the initial tool protocol. The
-successful mode is scoped to account, caller, model, conversation and family.
-A new request family is reevaluated.
+streaming path. From 0.5.10, every callable client tool starts on native transport,
+including a single function with optional or required tool choice. No-callable
+requests start on text; existing tool history still requires terminal validation.
+The successful mode is scoped to account, caller, model, conversation, capability
+family and tool-choice requirement. A new request contract is reevaluated.
 
 Tool responses are validated before delivery. Alternate local decoding uses the
 same complete response when possible. Network fallback switches protocol at most

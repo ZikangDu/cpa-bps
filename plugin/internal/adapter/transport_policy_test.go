@@ -30,21 +30,21 @@ func TestAutoPolicyUsesRequestStructureNotPromptKeywords(t *testing.T) {
 		{"plain", `{"model":"fixture","input":"native Excel code tools required"}`, "text", false},
 		{"image", `{"model":"fixture","input":[{"role":"user","content":[{"type":"input_image","file_id":"file_x"}]}]}`, "text", false},
 		{"structured", `{"input":"q","text":{"format":{"type":"json_schema"}}}`, "text", false},
-		{"one function", `{"tools":[{"type":"function","name":"sum"}]}`, "text", true},
+		{"one function", `{"tools":[{"type":"function","name":"sum"}]}`, "native", true},
 		{"code function", `{"tools":[{"type":"function","name":"python","parameters":{"properties":{"code":{"type":"string"}}}}]}`, "native", true},
 		{"command", `{"tools":[{"type":"function","name":"exec_command","parameters":{"properties":{"cmd":{"type":"string"}}}}]}`, "native", true},
-		{"unrelated cmd", `{"tools":[{"type":"function","name":"record","parameters":{"properties":{"cmd":{"type":"string"}}}}]}`, "text", true},
+		{"unrelated cmd", `{"tools":[{"type":"function","name":"record","parameters":{"properties":{"cmd":{"type":"string"}}}}]}`, "native", true},
 		{"custom", `{"tools":[{"type":"custom","name":"patch"}]}`, "native", true},
 		{"nested namespace", `{"tools":[{"type":"namespace","name":"excel","tools":[{"type":"namespace","name":"sheet","tools":[{"type":"function","name":"read"}]}]}]}`, "native", true},
 		{"two functions", `{"tools":[{"type":"function","name":"a"},{"type":"function","name":"b"}]}`, "native", true},
-		{"no parallel", `{"tools":[{"type":"function","name":"a"},{"type":"function","name":"b"}],"parallel_tool_calls":false}`, "text", true},
+		{"no parallel", `{"tools":[{"type":"function","name":"a"},{"type":"function","name":"b"}],"parallel_tool_calls":false}`, "native", true},
 		{"one explicit parallel", `{"tools":[{"type":"function","name":"a"}],"parallel_tool_calls":true}`, "native", true},
-		{"one chosen function", `{"tools":[{"type":"function","name":"a"},{"type":"function","name":"b"}],"tool_choice":{"type":"function","name":"a"}}`, "text", true},
-		{"allowed one", `{"tools":[{"type":"function","name":"a"},{"type":"function","name":"b"}],"tool_choice":{"type":"allowed_tools","tools":[{"type":"function","name":"a"}]}}`, "text", true},
-		{"none", `{"tools":[{"type":"custom","name":"patch"}],"tool_choice":"none"}`, "native", true},
+		{"one chosen function", `{"tools":[{"type":"function","name":"a"},{"type":"function","name":"b"}],"tool_choice":{"type":"function","name":"a"}}`, "native", true},
+		{"allowed one", `{"tools":[{"type":"function","name":"a"},{"type":"function","name":"b"}],"tool_choice":{"type":"allowed_tools","tools":[{"type":"function","name":"a"}]}}`, "native", true},
+		{"none", `{"tools":[{"type":"custom","name":"patch"}],"tool_choice":"none"}`, "text", true},
 		{"result history", `{"input":[{"type":"function_call_output","call_id":"x","output":"5"}]}`, "text", true},
 		{"dynamic tools", `{"input":[{"type":"additional_tools","tools":[{"type":"custom","name":"patch"}]}]}`, "native", true},
-		{"dynamic overrides kind", `{"tools":[{"type":"custom","name":"patch"}],"input":[{"type":"additional_tools","tools":[{"type":"function","name":"patch"}]}]}`, "text", true},
+		{"dynamic overrides kind", `{"tools":[{"type":"custom","name":"patch"}],"input":[{"type":"additional_tools","tools":[{"type":"function","name":"patch"}]}]}`, "native", true},
 		{"hosted not client", `{"tools":[{"type":"web_search"}]}`, "text", false},
 	}
 	for _, tc := range cases {
@@ -84,8 +84,8 @@ func TestAutoPolicyLearnsWithinCapabilityClassAndReevaluatesNewRequests(t *testi
 			_ = json.Unmarshal([]byte(tc.source), &body)
 			body["tool_choice"] = "none"
 			followup, _ := json.Marshal(body)
-			if learned, again, _ := policySelect(t, r, string(followup)); learned != "text" || key != again {
-				t.Fatal("result-only turn lost its capability family")
+			if learned, again, _ := policySelect(t, r, string(followup)); learned != "text" || key == again {
+				t.Fatal("no-tool turn reused a callable-tool transport binding")
 			}
 		})
 	}
@@ -116,8 +116,14 @@ func TestAutoPolicyInfersResultFamilyAfterToolsAreRemoved(t *testing.T) {
 			history = append(history, map[string]any{"type": "function_call_output", "call_id": "c", "output": "5"})
 			followup, _ := json.Marshal(map[string]any{"model": "fixture", "prompt_cache_key": "session", "tool_choice": "none", "input": history})
 			mode, resultKey, buffer := policySelect(t, r, string(followup))
-			if !buffer || mode != "text" || resultKey != key {
-				t.Fatalf("history failed to preserve family: %s", tc.name)
+			if !buffer || mode != "text" || resultKey == key {
+				t.Fatalf("history failed to isolate a result-only turn: %s", tc.name)
+			}
+			var currentTools []any
+			_ = json.Unmarshal([]byte(tc.tools), &currentTools)
+			withCatalog, _ := json.Marshal(map[string]any{"model": "fixture", "prompt_cache_key": "session", "tool_choice": "none", "tools": currentTools, "input": history})
+			if catalogMode, catalogKey, _ := policySelect(t, r, string(withCatalog)); catalogMode != "text" || catalogKey != resultKey {
+				t.Fatalf("removing the catalog changed result-only capability: %s", tc.name)
 			}
 		})
 	}
@@ -244,12 +250,83 @@ func TestAutoTransportRejectsMalformedRequest(t *testing.T) {
 func TestAutoPolicyResultUsesRecentCallInsteadOfUnrelatedCatalogFamily(t *testing.T) {
 	r := policyRuntime()
 	tools := `[{"type":"function","name":"sum"},{"type":"custom","name":"patch"}]`
-	initial := `{"model":"fixture","prompt_cache_key":"session","tools":` + tools + `,"tool_choice":{"type":"function","name":"sum"}}`
+	initial := `{"model":"fixture","prompt_cache_key":"session","tools":` + tools + `,"tool_choice":{"type":"allowed_tools","mode":"auto","tools":[{"type":"function","name":"sum"}]}}`
 	_, key, _ := policySelect(t, r, initial)
 	r.transports.learn(key, "text")
 	followup := `{"model":"fixture","prompt_cache_key":"session","tools":` + tools + `,"tool_choice":"none","input":[{"role":"user","content":"task"},{"type":"function_call","name":"sum","call_id":"c","arguments":"{}"},{"type":"function_call_output","call_id":"c","output":"5"}]}`
 	mode, resultKey, _ := policySelect(t, r, followup)
-	if mode != "text" || resultKey != key {
-		t.Fatal("unused custom declaration changed result-round family")
+	if mode != "text" || resultKey == key {
+		t.Fatal("result-round reused a callable-tool binding")
+	}
+	var withoutCatalog map[string]any
+	_ = json.Unmarshal([]byte(followup), &withoutCatalog)
+	delete(withoutCatalog, "tools")
+	raw, _ := json.Marshal(withoutCatalog)
+	if _, withoutCatalogKey, _ := policySelect(t, r, string(raw)); withoutCatalogKey != resultKey {
+		t.Fatal("unused custom declaration changed the result-round family")
+	}
+}
+
+func TestCallableToolTransportStartsNativeAcrossModelsAndChoices(t *testing.T) {
+	models := []string{"gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-6-luna", "gpt-6-sol", "gpt-6-astra", "gpt-6.1-sol", "gpt-6.2-sol", "gpt-6.2-astra", "future-model"}
+	choices := []any{
+		nil, "auto", "required",
+		map[string]any{"type": "allowed_tools", "mode": "auto", "tools": []any{map[string]any{"type": "function", "name": "lookup"}}},
+		map[string]any{"type": "function", "name": "lookup"},
+		map[string]any{"type": "allowed_tools", "mode": "required", "tools": []any{map[string]any{"type": "function", "name": "lookup"}}},
+	}
+	for _, model := range models {
+		for _, choice := range choices {
+			body := map[string]any{"model": model, "input": "fixture", "prompt_cache_key": "required-audit", "tools": []any{map[string]any{"type": "function", "name": "lookup"}}, "tool_choice": choice, "parallel_tool_calls": false}
+			raw, _ := json.Marshal(body)
+			mode, _, buffered := policySelect(t, policyRuntime(), string(raw))
+			if mode != "native" || !buffered {
+				t.Fatalf("callable tool did not use native transport: model=%s choice=%v mode=%s", model, choice, mode)
+			}
+		}
+	}
+}
+
+func TestRequiredAndOptionalTransportBindingsStaySeparate(t *testing.T) {
+	r := policyRuntime()
+	body := map[string]any{"model": "fixture", "input": "fixture", "prompt_cache_key": "policy-transition", "tools": []any{map[string]any{"type": "function", "name": "lookup"}}}
+	selectChoice := func(choice any) (string, [32]byte) {
+		t.Helper()
+		body["tool_choice"] = choice
+		raw, _ := json.Marshal(body)
+		mode, key, buffered := policySelect(t, r, string(raw))
+		if !buffered {
+			t.Fatal("tool request lost buffering")
+		}
+		return mode, key
+	}
+	mode, optionalKey := selectChoice("auto")
+	if mode != "native" {
+		t.Fatal("optional simple function did not start on native transport")
+	}
+	r.transports.learn(optionalKey, "text")
+	mode, requiredKey := selectChoice("required")
+	if mode != "native" || requiredKey == optionalKey {
+		t.Fatal("optional text success masked the required-call native capability")
+	}
+	for _, choice := range []any{map[string]any{"type": "function", "name": "lookup"}, map[string]any{"type": "allowed_tools", "mode": "required", "tools": []any{map[string]any{"type": "function", "name": "lookup"}}}} {
+		if mode, key := selectChoice(choice); mode != "native" || key != requiredKey {
+			t.Fatal("equivalent required policies lost their capability identity")
+		}
+	}
+	// Successful, fully validated fallback can still be learned independently
+	// for required calls; this does not relax the replay safety gate.
+	r.transports.learn(requiredKey, "text")
+	if mode, key := selectChoice("required"); mode != "text" || key != requiredKey {
+		t.Fatal("validated required-call fallback was not retained")
+	}
+	r.transports.learn(requiredKey, "native")
+	for _, choice := range []any{nil, "auto", map[string]any{"type": "allowed_tools", "mode": "auto", "tools": []any{map[string]any{"type": "function", "name": "lookup"}}}} {
+		if mode, key := selectChoice(choice); mode != "text" || key != optionalKey {
+			t.Fatal("required-call binding changed optional/no-tool behavior")
+		}
+	}
+	if mode, key := selectChoice("none"); mode != "text" || key == optionalKey || key == requiredKey {
+		t.Fatal("tool_choice none did not retain its independent text default")
 	}
 }

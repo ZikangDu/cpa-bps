@@ -21,6 +21,14 @@ Original-plugin captures also confirmed JSON-string-encoded function arguments;
 these are decoded locally and validated against the full declared schema.
 Neither fix executes a tool or requires another generation.
 
+Cross-model acceptance additionally reproduced Luna returning undeclared built-in
+actions through the text relay, for both optional and required client tool calls.
+The same synthetic request succeeds through native transport. Automatic mode now
+starts all callable client tools on the original native transport, independent of
+model name. Requests with no callable tools keep the text path. Required, optional
+and no-call contracts have separate learned capability keys. The bounded safe
+fallback remains; unknown hosted actions never authorize replay.
+
 Text tool relays accept a complete final-message JSON envelope after commentary,
 without searching arbitrary prose for JSON. A preceding JSON example, later
 prose, multiple envelopes, refusal and unfinished responses do not become tool
@@ -48,9 +56,9 @@ never tool arguments, upstream messages, document text or credentials.
 ## Validation and retained failures
 
 Original-binary offline captures and the reconstruction run with synthetic TLS,
-credentials and disabled external networking. The initial expanded comparison
-covered 39 common cases / 109 checks, followed by the actual failing relay and
-additional encoded-argument boundaries. Full plugin race/vet and isolated native
+credentials and disabled external networking. The final comparison covered
+49 original cases and 55 candidate cases, with 213 checks passing, including the
+actual failing relay and encoded-argument boundaries. Full plugin race/vet and isolated native
 ABI checks cover the new behavior.
 
 Document ABI validation passed 26 cases, including PDF, scanned/mixed PDF,
