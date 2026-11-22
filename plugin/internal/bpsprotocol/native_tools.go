@@ -63,7 +63,24 @@ func rawFunctionRelayArguments(name, field string, arguments map[string]any) map
 	payload := metadata[field]
 	delete(metadata, field)
 	return map[string]any{"summary": functionRelayPrefix(field) + name, "code": payload,
-		"extended_summary": string(jsonBytes(metadata)), "destructive": false, "references": []any{}}
+		"extended_summary": string(jsonBytes(metadata)), "destructive": false, "references": []any{nativeRelayReference}}
+}
+
+// Older relays used an empty array. Current native catalogs require at least
+// one reference, so new calls use one fixed label that cannot be a tool name.
+func validRawRelayReferences(value any) bool {
+	values, ok := value.([]any)
+	if !ok {
+		return false
+	}
+	if len(values) == 0 {
+		return true
+	}
+	if len(values) != 1 {
+		return false
+	}
+	reference, ok := values[0].(string)
+	return ok && reference == nativeRelayReference
 }
 
 // Codex agent-message ciphertext is not readable in the Excel/BPS channel.

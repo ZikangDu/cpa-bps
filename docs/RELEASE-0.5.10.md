@@ -29,6 +29,17 @@ model name. Requests with no callable tools keep the text path. Required, option
 and no-call contracts have separate learned capability keys. The bounded safe
 fallback remains; unknown hosted actions never authorize replay.
 
+Real response tool catalogs exposed another incompatibility shared with the old
+original prompt: `run_officejs.references` is required and now has `minItems: 1`,
+while the relay instructions requested an empty array. During native acceptance
+two Sol requests exceeded the 120-second client deadline while producing tool
+arguments without a terminal event. Both ordinary and original-protocol A/B
+responses also showed empty or arbitrary reference strings. The relay now asks
+for the stable nonempty label `["External client tool"]`, which is transport
+metadata, never a client argument. Cross-account reconstructed histories use the
+same valid shape. Raw code/command relays accept this exact label and legacy empty
+arrays; other references remain rejected. No incomplete call is delivered.
+
 Text tool relays accept a complete final-message JSON envelope after commentary,
 without searching arbitrary prose for JSON. A preceding JSON example, later
 prose, multiple envelopes, refusal and unfinished responses do not become tool

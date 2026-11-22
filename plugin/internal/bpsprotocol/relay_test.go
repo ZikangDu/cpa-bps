@@ -71,7 +71,8 @@ func TestCurrentToolPromptAndReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(body), "references=[]") ||
+	if !strings.Contains(string(body), "External client tool") ||
+		strings.Contains(string(body), "references=[]") ||
 		!strings.Contains(string(body), "This response must contain a call") ||
 		strings.Contains(string(body), "references to an array containing exactly one") {
 		t.Fatal("prompt did not use the current relay contract")

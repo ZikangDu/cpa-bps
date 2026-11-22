@@ -39,7 +39,7 @@ func clientToolRelayExamples(names []string, specs map[string]toolSpec) string {
 		}
 		outer := map[string]any{
 			"summary": "Run client tool " + name, "extended_summary": "Relay one client tool through the external client",
-			"destructive": false, "references": []any{}, "code": payload,
+			"destructive": false, "references": []any{nativeRelayReference}, "code": payload,
 		}
 		if spec.Type == "custom" {
 			outer["summary"] = customRelayPrefix + name

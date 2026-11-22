@@ -10,7 +10,7 @@ import (
 
 const maxNativeRepairAddition = 1 << 20
 
-const nativeRepairInstruction = "The previous native run_officejs calls were rejected as invalid client-tool transports and were not executed. Correct only the transport format using the existing declared client tool catalog and current-turn tool policy. FUNCTION uses one name/arguments JSON envelope; eligible FUNCTION_CODE and FUNCTION_CMD use the exact summary marker, raw code or cmd, and remaining arguments JSON in extended_summary; CUSTOM uses its exact marker and raw input. Do not execute Office JavaScript or call undeclared tools. Do not repeat any client tool that previously completed. If no tool is permitted, return assistant text."
+const nativeRepairInstruction = "The previous native run_officejs calls were rejected as invalid client-tool transports and were not executed. Correct only the transport format using the existing declared client tool catalog and current-turn tool policy. FUNCTION uses one name/arguments JSON envelope; eligible FUNCTION_CODE and FUNCTION_CMD use the exact summary marker, raw code or cmd, and remaining arguments JSON in extended_summary; CUSTOM uses its exact marker and raw input. " + nativeReferencesInstruction + " Do not execute Office JavaScript or call undeclared tools. Do not repeat any client tool that previously completed. If no tool is permitted, return assistant text."
 
 const nativeRepairFailure = "The proxy did not execute this call because it was not a valid declared client-tool transport. Follow the existing catalog transport and tool-choice rules."
 

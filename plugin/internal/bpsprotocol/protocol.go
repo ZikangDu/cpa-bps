@@ -17,10 +17,12 @@ import (
 )
 
 const (
-	transportName       = "run_officejs"
-	transportAlias      = "functions.run_officejs"
-	toolCatalogPrefix   = "This request is relayed by an external Responses API client, not by the live Excel workbook. The native run_officejs function is a transport endpoint owned by this proxy. The proxy intercepts it before execution, so it never runs Office code or changes the workbook."
-	toolCatalogReminder = "Call each client tool using one native run_officejs call and the transport specified by its catalog: FUNCTION uses a name/arguments JSON envelope; FUNCTION_CODE and FUNCTION_CMD use raw code or cmd plus metadata JSON in extended_summary; CUSTOM uses its exact marker and raw input. Set references to an empty array."
+	transportName               = "run_officejs"
+	transportAlias              = "functions.run_officejs"
+	nativeRelayReference        = "External client tool"
+	nativeReferencesInstruction = `Set the outer references field to ["External client tool"]. This required nonempty transport label is not a client tool argument, file path or workbook target.`
+	toolCatalogPrefix           = "This request is relayed by an external Responses API client, not by the live Excel workbook. The native run_officejs function is a transport endpoint owned by this proxy. The proxy intercepts it before execution, so it never runs Office code or changes the workbook."
+	toolCatalogReminder         = "Call each client tool using one native run_officejs call and the transport specified by its catalog: FUNCTION uses a name/arguments JSON envelope; FUNCTION_CODE and FUNCTION_CMD use raw code or cmd plus metadata JSON in extended_summary; CUSTOM uses its exact marker and raw input. " + nativeReferencesInstruction
 )
 
 type toolSpec struct {
@@ -181,7 +183,7 @@ func clientToolProtocolInstructions(source map[string]any) string {
 	return toolCatalogPrefix + " The native run_officejs call carries a request for the external client to execute." +
 		" For ordinary FUNCTION transport, set code to JSON containing the exact catalog name in name and the parameter object in arguments. Follow a catalog FUNCTION_CODE or FUNCTION_CMD override instead when specified." +
 		" For a custom tool, set summary to codex2api.custom/CATALOG_NAME and set code to its exact raw input, preserving whitespace." +
-		" Include extended_summary, destructive=false, and references=[] in the outer arguments." +
+		" Include extended_summary and destructive=false in the outer arguments. " + nativeReferencesInstruction +
 		" Treat tool results as the named external tool's results, then continue the task without repeating completed calls." +
 		" Use only the tools listed below. Answer as assistant text when no tool is required." +
 		required + " " + functionRelayEncoding + clientToolRelayExamples(names, specs) +
@@ -352,7 +354,7 @@ func fallbackTransportCall(item map[string]any) map[string]any {
 		"extended_summary": "Relay " + name + " through the external client",
 		"code":             payload,
 		"destructive":      false,
-		"references":       []any{},
+		"references":       []any{nativeRelayReference},
 	}
 	if item["type"] == "custom_tool_call" {
 		outerArguments["summary"] = customRelayPrefix + name
@@ -792,7 +794,7 @@ func transportEnvelope(native map[string]any, declared map[string]toolSpec) (map
 			return nil, relayError("function_metadata_duplicates_payload")
 		}
 		if references, exists := arguments["references"]; exists {
-			if values, ok := references.([]any); !ok || len(values) != 0 {
+			if !validRawRelayReferences(references) {
 				return nil, relayError("function_marker_references_invalid")
 			}
 		}
