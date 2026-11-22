@@ -38,6 +38,7 @@ func TestAutoTransportFallbackAndStableBinding(t *testing.T) {
 		t.Run(fmt.Sprint(nativeFirst), func(t *testing.T) {
 			r, _, auth := quotaFixture(t)
 			r.cfg.BPSToolTransport = "auto"
+			r.cfg.NativeToolRepairAttempts = 0 // This case isolates protocol switching.
 			var modes []string
 			r.client = upstream.NewWithTransport(qualityMemoryTransport(func(req *http.Request) (*http.Response, error) {
 				if req.Method == http.MethodGet {

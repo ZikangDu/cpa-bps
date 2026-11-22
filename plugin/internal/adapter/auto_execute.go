@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime"
 	"net/http"
@@ -119,6 +120,7 @@ func (r *Runtime) runAutomaticAttempts(cfg config, req executionRequest, source 
 		return prepareAutomaticPayload(cfg, req, source, mode)
 	}
 	var earlier [][]byte
+	var initialNativeFailure *bpsprotocol.Error
 	switched := false
 	repairs := 0
 	for attempt := 0; attempt < maxAutomaticAttempts; attempt++ {
@@ -167,7 +169,22 @@ func (r *Runtime) runAutomaticAttempts(cfg config, req executionRequest, source 
 			}
 		}
 		if transformErr != nil {
+			if mode == "native" && initialNativeFailure == nil {
+				_ = errors.As(transformErr, &initialNativeFailure)
+			}
 			if (incremental == nil || !incremental.activated) && attempt+1 < maxAutomaticAttempts && bpsprotocol.CanFallbackToolResponse(body, transformErr) && !autoHistoryConflict(source, body) {
+				// Correct a known unexecuted native relay before moving to the
+				// less reliable text protocol. On a native-first request reserve
+				// the third attempt for one protocol switch; a text-first request
+				// can still use its last attempt to repair the native fallback.
+				if mode == "native" && repairs < cfg.NativeToolRepairAttempts && (switched || repairs == 0) {
+					if next, ok := bpsprotocol.RepairNativePayload(payload, body, transformErr); ok {
+						earlier = append(earlier, body)
+						payload = next
+						repairs++
+						continue
+					}
+				}
 				if !switched {
 					next := "native"
 					if mode == "native" {
@@ -182,16 +199,8 @@ func (r *Runtime) runAutomaticAttempts(cfg config, req executionRequest, source 
 					switched = true
 					continue
 				}
-				if mode == "native" && repairs < cfg.NativeToolRepairAttempts {
-					if next, ok := bpsprotocol.RepairNativePayload(payload, body, transformErr); ok {
-						earlier = append(earlier, body)
-						payload = next
-						repairs++
-						continue
-					}
-				}
 			}
-			return nil, protocolError(transformErr)
+			return nil, protocolErrorWithInitialNative(transformErr, initialNativeFailure)
 		}
 		if autoHistoryConflict(source, transformed) {
 			return nil, failure(http.StatusUnprocessableEntity, "bps_duplicate_tool_call", "The upstream reused an existing tool call identifier.")
@@ -219,6 +228,21 @@ func (r *Runtime) runAutomaticAttempts(cfg config, req executionRequest, source 
 		return final, nil
 	}
 	return nil, interrupted("bps_tool_protocol_unavailable", "The upstream did not satisfy the tool protocol within the bounded compatibility attempts.")
+}
+
+// Preserve only allowlisted protocol categories from the first native failure.
+// Raw error strings, upstream bodies and tool/argument values never enter it.
+func protocolErrorWithInitialNative(err error, first *bpsprotocol.Error) error {
+	converted := protocolError(err)
+	problem, ok := converted.(*rpcError)
+	if !ok || first == nil {
+		return converted
+	}
+	stage, reason := first.SafeDiagnostic()
+	if stage != "" && reason != "" {
+		problem.Message += "; initial_native=(" + stage + ": " + reason + ")"
+	}
+	return problem
 }
 
 func autoHistoryConflict(source, response []byte) bool {

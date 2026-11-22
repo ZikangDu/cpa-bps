@@ -10,6 +10,9 @@ Go source is still unavailable; these are verified reconstruction changes.
   and accept the original plugin's JSON-string-encoded function arguments.
 - Start callable client tools on the original native transport. Optional,
   required and no-call contracts have separate learned transport bindings.
+  Correct a complete, known, unexecuted native relay before switching to text;
+  the total budget remains three generations and one transport switch. Initial
+  failure diagnostics use fixed categories, without exposing request contents.
 - Use `references:["External client tool"]`, satisfying the actual native
   `minItems:1` schema. Legacy empty-array histories remain compatible. Client
   code, commands and custom inputs are not rewritten.
@@ -104,3 +107,16 @@ streams delivered early text; all 20 canceled streams closed upstream and
 drained admission. Late errors and invalid tool relays never became successful
 completions or triggered another generation after text delivery. These figures
 isolate removed proxy buffering, not BPS model latency.
+
+A same-account, same-model (`gpt-6-sol`) real A/B test completed eight requests
+(two samples per path and version). First nonempty text-delta medians were:
+
+| Request path | Before | After |
+| --- | ---: | ---: |
+| Tool history, `tool_choice:none` | 4.893 s | 2.340 s |
+| Optional native tools, plain final answer | 5.542 s | 2.717 s |
+
+Every response completed with consistent streamed and terminal text. The new
+version delivered text while generation continued, rather than merely sending
+headers earlier. These small samples show the observed improvement for this
+fixture, not a guaranteed latency or a statistical service-level claim.
