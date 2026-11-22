@@ -11,7 +11,8 @@ import (
 
 const maxRejectionBodyBytes = 64 << 10
 
-// Rejection contains only fixed diagnostic text and validated numeric metadata.
+// Rejection contains only fixed diagnostic text, allowlisted schema paths and
+// validated numeric metadata.
 // It never includes an upstream message, request header, account identifier, or
 // response body. HTTPStatus preserves an upstream error status.
 type Rejection struct {
@@ -82,6 +83,14 @@ func describeRejection(response *http.Response, now time.Time) Rejection {
 	if response.StatusCode == http.StatusForbidden && isExactUsagePolicyRejection(body) {
 		return set("bps_usage_policy_blocked", "The upstream usage policy blocked this request. Check the official service or contact support; reset credits cannot remove this restriction.")
 	}
+	if response.StatusCode == http.StatusUnprocessableEntity {
+		if isExactRequestBodyRejection(body) {
+			return set("bps_request_validation_failed", "The upstream rejected the request body. Check that its structure matches the supported request format.")
+		}
+		if message, ok := requestValidationMessage(body["detail"]); ok {
+			return set("bps_request_validation_failed", message)
+		}
+	}
 	// Only exact machine-readable codes are accepted. Human text is neither
 	// copied nor searched, since it may contain secrets or misleading content.
 	for _, code := range rejectionMachineCodes(body) {
@@ -117,7 +126,130 @@ func describeRejection(response *http.Response, now time.Time) Rejection {
 	return result
 }
 
-// These two complete, known service messages are the only human-text exception.
+// This uncoded wrapper was observed for a BPS request-schema rejection. Match
+// the complete signature, not fragments of potentially private upstream text;
+// it establishes no particular field, quota or credential diagnosis.
+func isExactRequestBodyRejection(body map[string]json.RawMessage) bool {
+	var detail map[string]json.RawMessage
+	if len(body) != 1 || json.Unmarshal(body["error"], &detail) != nil || len(detail) != 4 {
+		return false
+	}
+	var message, kind string
+	return json.Unmarshal(detail["message"], &message) == nil && message == "422: Invalid request body." &&
+		json.Unmarshal(detail["type"], &kind) == nil && kind == "server_error" &&
+		strings.TrimSpace(string(detail["code"])) == "null" && strings.TrimSpace(string(detail["param"])) == "null"
+}
+
+// FastAPI's validation message, input and ctx may include arbitrary request
+// content. Only exact validation codes and bounded, known schema locations
+// qualify; a partly recognized or malformed array must stay generic.
+func requestValidationMessage(raw json.RawMessage) (string, bool) {
+	const maxDetails, maxShown = 128, 4
+	var entries []json.RawMessage
+	if json.Unmarshal(raw, &entries) != nil || len(entries) == 0 || len(entries) > maxDetails {
+		return "", false
+	}
+	fields := make([]string, 0, maxShown)
+	seen := make(map[string]struct{})
+	more := false
+	for _, entry := range entries {
+		var detail struct {
+			Type string            `json:"type"`
+			Loc  []json.RawMessage `json:"loc"`
+		}
+		if json.Unmarshal(entry, &detail) != nil || !knownValidationType(detail.Type) {
+			return "", false
+		}
+		path, ok := validationFieldPath(detail.Loc)
+		if !ok {
+			return "", false
+		}
+		if _, exists := seen[path]; exists {
+			continue
+		}
+		seen[path] = struct{}{}
+		if len(fields) < maxShown {
+			fields = append(fields, path+" ("+detail.Type+")")
+		} else {
+			more = true
+		}
+	}
+	message := "The upstream rejected the request schema. Invalid fields: " + strings.Join(fields, "; ") + "."
+	if more {
+		message += " Additional validation fields were omitted."
+	}
+	return message, true
+}
+
+func knownValidationType(value string) bool {
+	switch value {
+	case "missing", "extra_forbidden", "literal_error", "enum", "value_error", "assertion_error",
+		"string_type", "string_too_short", "string_too_long", "string_pattern_mismatch",
+		"int_type", "int_parsing", "int_from_float", "float_type", "float_parsing", "finite_number",
+		"bool_type", "bool_parsing", "none_required", "list_type", "tuple_type", "dict_type",
+		"model_type", "model_attributes_type", "union_tag_invalid", "union_tag_not_found",
+		"greater_than", "greater_than_equal", "less_than", "less_than_equal", "multiple_of",
+		"too_short", "too_long", "json_invalid", "json_type", "url_type", "url_parsing", "url_scheme":
+		return true
+	default:
+		return false
+	}
+}
+
+func validationFieldPath(parts []json.RawMessage) (string, bool) {
+	if len(parts) == 0 || len(parts) > 16 {
+		return "", false
+	}
+	var root string
+	if json.Unmarshal(parts[0], &root) != nil || root != "body" {
+		return "", false
+	}
+	var path strings.Builder
+	path.WriteString("body")
+	for _, part := range parts[1:] {
+		var name string
+		if json.Unmarshal(part, &name) == nil {
+			if !knownValidationField(name) {
+				return "", false
+			}
+			path.WriteByte('.')
+			path.WriteString(name)
+		} else {
+			var index int
+			if json.Unmarshal(part, &index) != nil || index < 0 || index > 65535 {
+				return "", false
+			}
+			path.WriteByte('[')
+			path.WriteString(strconv.Itoa(index))
+			path.WriteByte(']')
+		}
+		if path.Len() > 128 {
+			return "", false
+		}
+	}
+	return path.String(), true
+}
+
+func knownValidationField(value string) bool {
+	switch value {
+	case "model", "model_selection", "input", "instructions", "stream", "store", "tools", "tool_choice",
+		"parallel_tool_calls", "reasoning", "reasoning_effort", "effort", "summary", "content", "type",
+		"role", "text", "id", "status", "phase", "call_id", "name", "namespace", "arguments", "output",
+		"encrypted_content", "encrypted_function_args", "image_url", "file_id", "detail", "format", "schema",
+		"strict", "description", "parameters", "required", "properties", "additionalProperties", "items",
+		"context_management", "compact_threshold", "prompt_cache_key", "prompt_cache_retention", "metadata",
+		"client_metadata", "bps_tools_version_id", "language", "grammar", "syntax", "source", "mime_type",
+		"url", "data", "include", "max_output_tokens", "temperature", "top_p", "stop", "service_tier",
+		"message", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output",
+		"compaction", "agent_message", "input_text", "output_text", "input_image", "input_file", "refusal",
+		"summary_text", "reasoning_text":
+		return true
+	default:
+		return false
+	}
+}
+
+// Only these complete, known security messages qualify for this 403 diagnosis.
 // Do not use substring, case-folded, or whitespace-normalized matching: quoted
 // or attacker-supplied surrounding text must not manufacture this diagnosis.
 func isExactSecurityRejection(body map[string]json.RawMessage) bool {

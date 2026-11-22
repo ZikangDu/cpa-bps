@@ -1,7 +1,7 @@
 # CPA BPS Reconstruction
 
 A maintainable BPS provider plugin, a compatible CPA host, and the matching
-Manager interface. Current release: **0.5.8-reconstructed**.
+Manager interface. Current release: **0.5.9-reconstructed**.
 
 This is an independently maintained reconstruction. It is not the issuer's
 original BPS 0.5.31 Go source. The legacy ZIP already present in this repository
@@ -21,7 +21,7 @@ is a historical release artifact and is not used to build the reconstruction.
 
 [Source map](docs/SOURCE-MAP.md) · [Architecture](docs/ARCHITECTURE.md) ·
 [Operations and rollback](docs/OPERATIONS.md) · [Validation](docs/VALIDATION.md) ·
-[Release acceptance](docs/RELEASE-0.5.8.md) · [Third-party notices](docs/THIRD-PARTY.md)
+[Release acceptance](docs/RELEASE-0.5.9.md) · [Third-party notices](docs/THIRD-PARTY.md)
 
 ## Build
 
@@ -29,9 +29,9 @@ Use Go 1.26.10+ and a C toolchain. For a complete Linux image from source:
 
 ```sh
 docker build -f deploy/Dockerfile --target api \
-  --build-arg SOURCE_COMMIT="$(git rev-parse HEAD)" -t cpa-bps-api:0.5.8 .
+  --build-arg SOURCE_COMMIT="$(git rev-parse HEAD)" -t cpa-bps-api:0.5.9 .
 docker build -f deploy/Dockerfile --target manager \
-  --build-arg SOURCE_COMMIT="$(git rev-parse HEAD)" -t cpa-bps-manager:0.5.8 .
+  --build-arg SOURCE_COMMIT="$(git rev-parse HEAD)" -t cpa-bps-manager:0.5.9 .
 ```
 
 For local plugin development:

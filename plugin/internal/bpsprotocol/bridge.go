@@ -122,6 +122,8 @@ func prepare(raw []byte, scope string, options Options) ([]byte, *Bridge, error)
 	textTools := options.ToolTransport == "text" && usesTextTools(source)
 	if textTools {
 		prepareTextTools(source, body, formatInstructions)
+	} else {
+		body["input"] = liftToolOutputImages(body["input"])
 	}
 	return jsonBytes(body), &Bridge{source: source, scope: scope, structured: structured, toolSchemas: toolSchemas, textTools: textTools}, nil
 }
@@ -250,9 +252,9 @@ func stringValue(value any) string {
 func normalizeEffort(value any) string {
 	effort := strings.ToLower(stringValue(value))
 	switch effort {
-	case "x-high", "extra-high", "extra_high", "max":
+	case "x-high", "extra-high", "extra_high", "max", "ultra":
 		return "xhigh"
-	case "low", "medium", "high", "xhigh", "ultra":
+	case "low", "medium", "high", "xhigh":
 		return effort
 	default:
 		return "medium"

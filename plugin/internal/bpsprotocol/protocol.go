@@ -266,6 +266,16 @@ func stripClientMetadata(item map[string]any) map[string]any {
 	return copy
 }
 
+// BPS replays reasoning only through its opaque envelope. History preparation
+// can intentionally remove an old ciphertext; neither tool transport should
+// put that now-incomplete reasoning item back on the wire.
+func reasoningHistoryItem(item map[string]any) map[string]any {
+	if encrypted := stringValue(item["encrypted_content"]); encrypted != "" {
+		return map[string]any{"type": "reasoning", "summary": []any{}, "encrypted_content": encrypted}
+	}
+	return nil
+}
+
 func cloneObject(object map[string]any) map[string]any {
 	if object == nil {
 		return nil
@@ -420,8 +430,8 @@ func translateInputItems(rawInput any, scope string) []any {
 			continue
 		}
 		if itemType == "reasoning" {
-			if encrypted := stringValue(item["encrypted_content"]); encrypted != "" {
-				result = append(result, map[string]any{"type": "reasoning", "summary": []any{}, "encrypted_content": encrypted})
+			if reasoning := reasoningHistoryItem(item); reasoning != nil {
+				result = append(result, reasoning)
 			}
 			continue
 		}

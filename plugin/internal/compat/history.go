@@ -145,7 +145,7 @@ func configurationEffort(item map[string]json.RawMessage) (string, bool) {
 	switch effort {
 	case "none", "minimal", "low", "medium", "high", "xhigh":
 		return effort, true
-	case "x-high", "extra-high", "extra_high":
+	case "x-high", "extra-high", "extra_high", "max", "ultra":
 		return "xhigh", true
 	default:
 		return "", false

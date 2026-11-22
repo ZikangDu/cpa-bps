@@ -55,7 +55,10 @@ func prepareTextTools(source, body map[string]any, formatInstructions string) {
 	if formatInstructions != "" {
 		input = append(input, messageItem("developer", formatInstructions))
 	}
-	switch items := source["input"].(type) {
+	// Lift before rendering client results as text, so image parts remain real
+	// attachments. Keep source intact for turn/cache accounting and retries.
+	normalizedHistory := liftToolOutputImages(source["input"])
+	switch items := normalizedHistory.(type) {
 	case string:
 		input = append(input, messageItem("user", items))
 	case []any:
@@ -79,7 +82,14 @@ func prepareTextTools(source, body map[string]any, formatInstructions string) {
 				input = append(input, messageItem("user", "Client tool result: "+string(jsonBytes(map[string]any{
 					"call_id": item["call_id"], "output": item["output"],
 				}))))
+			case "reasoning":
+				if reasoning := reasoningHistoryItem(item); reasoning != nil {
+					input = append(input, reasoning)
+				}
 			default:
+				if item != nil {
+					raw = stripClientMetadata(item)
+				}
 				input = append(input, raw)
 			}
 		}

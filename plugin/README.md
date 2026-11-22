@@ -1,6 +1,6 @@
 # CPA BPS 插件重建版
 
-`0.5.8-reconstructed` 是依据线上 BPS 0.5.31 的请求记录、配置和二进制符号重建的 Go 插件。它复用 CLIProxyAPI 的原生 C ABI，保留插件 ID `cpa-bps`，通过可配置的 Responses 上游运行。0.5.31 的原始 Go 文件仍需发行方提供。
+`0.5.9-reconstructed` 是依据线上 BPS 0.5.31 的请求记录、配置和二进制符号重建的 Go 插件。它复用 CLIProxyAPI 的原生 C ABI，保留插件 ID `cpa-bps`，通过可配置的 Responses 上游运行。0.5.31 的原始 Go 文件仍需发行方提供。
 
 Quota-aware routing now checks account quota before dispatch and refreshes the observation after an upstream HTTP 429. A confirmed zero balance places the entire credential, across models, into cooldown until all exhausted windows reset. CPA can fail over to another available credential and retain session affinity there. When every credential is cooling down, the current request returns HTTP 429 with `Retry-After` instead of repeatedly generating or keeping the connection open. Use `routing.retry.request-retry: 0` and `routing.retry.max-retry-credentials: 0` to inspect each eligible credential at most once in a request, including pools larger than two accounts; keep `session-affinity-rebind-on: any` for automatic failover. At the recovery time, the plugin checks quota again before sending work.
 

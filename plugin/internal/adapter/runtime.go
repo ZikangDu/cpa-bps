@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -15,7 +16,7 @@ import (
 
 const (
 	provider        = "cpa-bps"
-	version         = "0.5.8-reconstructed"
+	version         = "0.5.9-reconstructed"
 	schemaVersion   = 6
 	executionWindow = 600 * time.Second
 	discoveryWindow = 5 * time.Second
@@ -258,6 +259,21 @@ type modelInfo struct {
 
 type modelThinking struct{ Levels []string }
 
+// BPS accepts these client compatibility aliases for xhigh. Advertise them
+// only where the account catalog supports their real upstream level, so
+// CPA's capability validation does not reject it before plugin normalization.
+func bpsClientEffortLevels(efforts []string) []string {
+	levels := slices.Clone(efforts)
+	if slices.Contains(levels, "xhigh") {
+		for _, alias := range []string{"max", "ultra", "x-high"} {
+			if !slices.Contains(levels, alias) {
+				levels = append(levels, alias)
+			}
+		}
+	}
+	return levels
+}
+
 func modelResponse(models []modelConfig) any {
 	result := make([]modelInfo, 0, len(models))
 	for _, model := range models {
@@ -317,7 +333,7 @@ func (r *Runtime) models(raw json.RawMessage) (any, error) {
 				SupportedOutputModalities: []string{"text"},
 			}
 			if len(model.Efforts) > 0 {
-				entry.Thinking = &modelThinking{Levels: model.Efforts}
+				entry.Thinking = &modelThinking{Levels: bpsClientEffortLevels(model.Efforts)}
 			}
 			models = append(models, entry)
 		}

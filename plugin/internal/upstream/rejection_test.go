@@ -190,3 +190,203 @@ func TestDescribeRejectionChallengeAndRetryAfter(t *testing.T) {
 		}
 	}
 }
+
+func TestRequestValidationRejectionUsesOnlySchemaLocations(t *testing.T) {
+	body := `{"detail":[
+		{"type":"missing","loc":["body","input",2,"encrypted_content"],"msg":"SECRET_MESSAGE for account@example.invalid","input":{"access_token":"SECRET_TOKEN"},"ctx":{"SECRET_KEY":"SECRET_CONTEXT"}},
+		{"type":"union_tag_invalid","loc":["body","input",3,"function_call_output","output",0,"type"],"msg":"SECRET_MESSAGE","input":"SECRET_INPUT"}
+	],"error":{"code":"insufficient_quota","message":"SECRET_QUOTA_TEXT"},"SECRET_TOP":"SECRET_VALUE"}`
+	response := &http.Response{StatusCode: 422, Header: http.Header{"Retry-After": {"123"}, "X-Private": {"SECRET_HEADER"}}, Body: io.NopCloser(strings.NewReader(body))}
+	defer response.Body.Close()
+	got := DescribeRejection(response)
+	want := "The upstream rejected the request schema. Invalid fields: body.input[2].encrypted_content (missing); body.input[3].function_call_output.output[0].type (union_tag_invalid)."
+	if got.Code != "bps_request_validation_failed" || got.HTTPStatus != 422 || got.RetryAfterSeconds != 0 || got.Message != want {
+		t.Fatalf("unexpected validation diagnosis: %+v", got)
+	}
+	raw, _ := json.Marshal(got)
+	if strings.Contains(string(raw), "SECRET") || strings.Contains(string(raw), "account@example.invalid") || strings.Contains(string(raw), "access_token") || got.DiagnosticShape["detail"] != "array" {
+		t.Fatal("validation diagnostics exposed request or upstream data")
+	}
+}
+
+func TestExactRequestValidationWrapperRequiresCompleteSignature(t *testing.T) {
+	const known = "422: Invalid request body."
+	for _, tt := range []struct {
+		name, message, kind string
+		status              int
+		code, param         any
+		remove, extra       string
+		want                string
+	}{
+		{name: "exact", message: known, kind: "server_error", status: 422, want: "bps_request_validation_failed"},
+		{name: "prefix", message: "SECRET " + known, kind: "server_error", status: 422},
+		{name: "suffix", message: known + " SECRET", kind: "server_error", status: 422},
+		{name: "whitespace", message: known + "\n", kind: "server_error", status: 422},
+		{name: "case", message: "422: invalid request body.", kind: "server_error", status: 422},
+		{name: "wrong_status", message: known, kind: "server_error", status: 400},
+		{name: "server_status", message: known, kind: "server_error", status: 500},
+		{name: "wrong_type", message: known, kind: "invalid_request_error", status: 422},
+		{name: "empty_type", message: known, status: 422},
+		{name: "nonempty_code", message: known, kind: "server_error", status: 422, code: "SECRET_CODE"},
+		{name: "empty_code", message: known, kind: "server_error", status: 422, code: ""},
+		{name: "object_code", message: known, kind: "server_error", status: 422, code: map[string]any{"SECRET": true}},
+		{name: "nonempty_param", message: known, kind: "server_error", status: 422, param: "SECRET_PARAM"},
+		{name: "empty_param", message: known, kind: "server_error", status: 422, param: ""},
+		{name: "object_param", message: known, kind: "server_error", status: 422, param: map[string]any{"SECRET": true}},
+		{name: "missing_code", message: known, kind: "server_error", status: 422, remove: "code"},
+		{name: "missing_param", message: known, kind: "server_error", status: 422, remove: "param"},
+		{name: "extra_error_field", message: known, kind: "server_error", status: 422, extra: "error"},
+		{name: "extra_top_field", message: known, kind: "server_error", status: 422, extra: "top"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			detail := map[string]any{"message": tt.message, "type": tt.kind, "code": tt.code, "param": tt.param}
+			if tt.remove != "" {
+				delete(detail, tt.remove)
+			}
+			body := map[string]any{"error": detail}
+			if tt.extra == "error" {
+				detail["SECRET_KEY"] = "SECRET_VALUE"
+			} else if tt.extra == "top" {
+				body["SECRET_KEY"] = "SECRET_VALUE"
+			}
+			raw, _ := json.Marshal(body)
+			response := &http.Response{StatusCode: tt.status, Header: http.Header{"Retry-After": {"120"}}, Body: io.NopCloser(strings.NewReader(string(raw)))}
+			defer response.Body.Close()
+			got := DescribeRejection(response)
+			want := tt.want
+			if want == "" {
+				want = "bps_upstream_rejected"
+			}
+			if got.Code != want || got.HTTPStatus != tt.status || got.RetryAfterSeconds != 0 {
+				t.Fatalf("unexpected strict validation wrapper diagnosis: %+v", got)
+			}
+			encoded, _ := json.Marshal(got)
+			if strings.Contains(string(encoded), "SECRET") {
+				t.Fatal("unknown validation wrapper text leaked")
+			}
+			if got.Code == "bps_request_validation_failed" && (strings.Contains(got.Message, "Invalid fields:") || strings.Contains(got.Message, "image")) {
+				t.Fatal("an uncoded wrapper was attributed to an unproven field")
+			}
+		})
+	}
+}
+
+func TestRequestValidationRejectsUnknownOrMalformedDetails(t *testing.T) {
+	valid := map[string]any{"type": "missing", "loc": []any{"body", "input", 0, "type"}}
+	tooDeep := []any{"body"}
+	for range 16 {
+		tooDeep = append(tooDeep, "input")
+	}
+	tooLong := []any{"body"}
+	for range 8 {
+		tooLong = append(tooLong, "encrypted_content")
+	}
+	tooMany := make([]any, 129)
+	for index := range tooMany {
+		tooMany[index] = valid
+	}
+	for _, tt := range []struct {
+		name   string
+		detail any
+	}{
+		{"null", nil},
+		{"empty", []any{}},
+		{"object", valid},
+		{"text", "SECRET missing body.input"},
+		{"null_entry", []any{nil}},
+		{"text_entry", []any{"SECRET"}},
+		{"unknown_code", []any{map[string]any{"type": "SECRET_CODE", "loc": []any{"body", "input"}}}},
+		{"non_validation_code", []any{map[string]any{"type": "insufficient_quota", "loc": []any{"body", "input"}}}},
+		{"missing_code", []any{map[string]any{"loc": []any{"body", "input"}, "msg": "missing"}}},
+		{"object_code", []any{map[string]any{"type": map[string]any{"SECRET": "missing"}, "loc": []any{"body"}}}},
+		{"missing_location", []any{map[string]any{"type": "missing"}}},
+		{"null_location", []any{map[string]any{"type": "missing", "loc": nil}}},
+		{"empty_location", []any{map[string]any{"type": "missing", "loc": []any{}}}},
+		{"text_location", []any{map[string]any{"type": "missing", "loc": "body.input"}}},
+		{"unknown_root", []any{map[string]any{"type": "missing", "loc": []any{"SECRET_ROOT", "input"}}}},
+		{"header_location", []any{map[string]any{"type": "missing", "loc": []any{"header", "authorization"}}}},
+		{"unknown_field", []any{map[string]any{"type": "missing", "loc": []any{"body", "metadata", "SECRET_KEY"}}}},
+		{"inline_location", []any{map[string]any{"type": "missing", "loc": []any{"body", "input[0]"}}}},
+		{"homograph_field", []any{map[string]any{"type": "missing", "loc": []any{"body", "іnput"}}}},
+		{"negative_index", []any{map[string]any{"type": "missing", "loc": []any{"body", "input", -1}}}},
+		{"oversized_index", []any{map[string]any{"type": "missing", "loc": []any{"body", "input", 65536}}}},
+		{"fractional_index", []any{map[string]any{"type": "missing", "loc": []any{"body", "input", 0.5}}}},
+		{"null_index", []any{map[string]any{"type": "missing", "loc": []any{"body", "input", nil}}}},
+		{"boolean_index", []any{map[string]any{"type": "missing", "loc": []any{"body", "input", true}}}},
+		{"text_index", []any{map[string]any{"type": "missing", "loc": []any{"body", "input", "0"}}}},
+		{"object_index", []any{map[string]any{"type": "missing", "loc": []any{"body", "input", map[string]any{"SECRET": "index"}}}}},
+		{"deep_location", []any{map[string]any{"type": "missing", "loc": tooDeep}}},
+		{"long_location", []any{map[string]any{"type": "missing", "loc": tooLong}}},
+		{"too_many_errors", tooMany},
+		{"mixed_unknown", []any{valid, map[string]any{"type": "SECRET_CODE", "loc": []any{"body", "input"}}}},
+		{"mixed_malformed", []any{valid, nil}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, _ := json.Marshal(map[string]any{"detail": tt.detail})
+			response := &http.Response{StatusCode: 422, Header: http.Header{"Retry-After": {"99"}}, Body: io.NopCloser(strings.NewReader(string(raw)))}
+			defer response.Body.Close()
+			got := DescribeRejection(response)
+			if got.Code != "bps_upstream_rejected" || got.HTTPStatus != 422 || got.RetryAfterSeconds != 0 {
+				t.Fatalf("unknown validation shape was classified: %+v", got)
+			}
+			encoded, _ := json.Marshal(got)
+			if strings.Contains(string(encoded), "SECRET") {
+				t.Fatal("unknown validation data leaked")
+			}
+		})
+	}
+}
+
+func TestRequestValidationMessageIsBoundedAndDeduplicated(t *testing.T) {
+	entries := []any{}
+	for index := range 6 {
+		entry := map[string]any{"type": "string_type", "loc": []any{"body", "input", index, "content", 0, "text"}}
+		entries = append(entries, entry, entry)
+	}
+	raw, _ := json.Marshal(map[string]any{"detail": entries})
+	response := &http.Response{StatusCode: 422, Body: io.NopCloser(strings.NewReader(string(raw)))}
+	defer response.Body.Close()
+	got := DescribeRejection(response)
+	if got.Code != "bps_request_validation_failed" || strings.Count(got.Message, "body.input[") != 4 ||
+		strings.Contains(got.Message, "body.input[4]") || !strings.Contains(got.Message, "Additional validation fields were omitted.") || len(got.Message) > 800 {
+		t.Fatalf("validation output was not bounded: %+v", got)
+	}
+	// The display cap must not prevent validation of later entries.
+	entries = append(entries, map[string]any{"type": "PRIVATE_VALUE", "loc": []any{"body", "input"}})
+	raw, _ = json.Marshal(map[string]any{"detail": entries})
+	response = &http.Response{StatusCode: 422, Body: io.NopCloser(strings.NewReader(string(raw)))}
+	defer response.Body.Close()
+	if got := DescribeRejection(response); got.Code != "bps_upstream_rejected" {
+		t.Fatal("malformed tail was ignored after reaching the display cap")
+	}
+}
+
+func TestRequestValidationRequires422AndACompleteBoundedBody(t *testing.T) {
+	for _, status := range []int{400, 401, 403, 409, 422, 429, 500} {
+		response := &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(`{"detail":[{"type":"model_type","loc":["body"],"input":"SECRET"}]}`))}
+		got := DescribeRejection(response)
+		response.Body.Close()
+		if (got.Code == "bps_request_validation_failed") != (status == 422) || got.HTTPStatus != status {
+			t.Fatalf("validation classification crossed status semantics: %+v", got)
+		}
+	}
+	for _, body := range []string{
+		`{"detail":[{"type":"missing","loc":["body","input"]}]`,
+		`{"detail":[{"type":"missing","loc":["body","input"]}]} {"error":"SECRET"}`,
+		`{"detail":[{"type":"missing","loc":["body","input",1e0]}]}`,
+	} {
+		response := &http.Response{StatusCode: 422, Body: io.NopCloser(strings.NewReader(body))}
+		got := DescribeRejection(response)
+		response.Body.Close()
+		if got.Code != "bps_upstream_rejected" {
+			t.Fatal("malformed or non-integer validation data was accepted")
+		}
+	}
+	raw, _ := json.Marshal(map[string]any{"detail": []any{map[string]any{"type": "missing", "loc": []any{"body", "input"}, "input": strings.Repeat("S", maxRejectionBodyBytes)}}})
+	body := &observedRejectionBody{reader: strings.NewReader(string(raw))}
+	got := DescribeRejection(&http.Response{StatusCode: 422, Body: body})
+	if got.Code != "bps_upstream_rejected" || got.BodyFormat != "at_limit" || body.read != maxRejectionBodyBytes || body.closed {
+		t.Fatal("validation parsing changed response body bounds or ownership")
+	}
+	body.Close()
+}
