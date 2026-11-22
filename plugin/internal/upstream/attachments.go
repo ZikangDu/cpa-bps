@@ -3,9 +3,11 @@ package upstream
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -15,11 +17,32 @@ import (
 )
 
 const (
-	maxInlineImages     = 8
-	maxInlineImageBytes = 5 << 20
-	maxInlineImageTotal = 16 << 20
-	maxUploadReplyBytes = 64 << 10
+	maxInlineImages          = 8
+	maxInlineImageBytes      = 5 << 20
+	maxInlineImageTotal      = 16 << 20
+	maxUploadReplyBytes      = 64 << 10
+	maxBPSInlineImages       = 1024
+	maxBPSInlineImageBytes   = 20 << 20
+	maxBPSInlineUniqueBytes  = 64 << 20
+	maxBPSInlineEncodedBytes = 96 << 20
 )
+
+// ImageLimitError reports only a fixed budget category and numeric values.
+// No filename, image URL, content digest or request text crosses this boundary.
+type ImageLimitError struct {
+	Kind   string
+	Limit  int64
+	Actual int64
+}
+
+func (e *ImageLimitError) Error() string {
+	return fmt.Sprintf("inline image limit exceeded: %s (limit=%d, actual=%d)", e.Kind, e.Limit, e.Actual)
+}
+func (e *ImageLimitError) Unwrap() error { return ErrInlineImageLimit }
+
+func imageLimit(kind string, limit, actual int) error {
+	return &ImageLimitError{Kind: kind, Limit: int64(limit), Actual: int64(actual)}
+}
 
 var (
 	ErrInvalidInlineImage = errors.New("inline image is not a supported base64 image")
@@ -39,9 +62,15 @@ type attachmentRewrite struct {
 type inlineImage struct {
 	partIndex int
 	part      map[string]json.RawMessage
+	content   *inlineImageContent
+}
+
+type inlineImageContent struct {
 	mimeType  string
 	extension string
-	data      []byte
+	encoded   string
+	bytes     int
+	digest    [sha256.Size]byte
 }
 
 // RewriteInlineImages optionally uploads normalized Responses image data URLs
@@ -79,7 +108,7 @@ func (c *Client) rewriteImages(ctx context.Context, filesURL, token string, payl
 			return nil, err
 		}
 	}
-	rewrites, err := inspectInlineImages(input)
+	rewrites, err := inspectInlineImages(ctx, input, bps)
 	if err != nil {
 		return nil, err
 	}
@@ -92,14 +121,25 @@ func (c *Client) rewriteImages(ctx context.Context, filesURL, token string, payl
 	}
 	// Preflight every image before creating any files. A failed upload is not
 	// replayed, and the caller receives no partially rewritten request.
+	fileIDs := make(map[*inlineImageContent]string)
 	for _, rewrite := range rewrites {
 		for _, image := range rewrite.images {
-			key := attachmentCacheKey(filesURL, token, image, bps)
-			fileID, errUpload := uploadedImages.get(ctx, key, func() (string, error) {
-				return c.uploadImage(ctx, filesURL, token, image, bps)
-			})
-			if errUpload != nil {
-				return nil, errUpload
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			fileID := fileIDs[image.content]
+			if fileID == "" {
+				key := attachmentCacheKey(filesURL, token, image, bps)
+				var errUpload error
+				fileID, errUpload = uploadedImages.get(ctx, key, func() (string, error) {
+					return c.uploadImage(ctx, filesURL, token, image, bps)
+				})
+				if errUpload != nil {
+					return nil, errUpload
+				}
+				// Request-local reuse remains valid even if unrelated concurrent
+				// uploads evict this reference from the global bounded cache.
+				fileIDs[image.content] = fileID
 			}
 			if bps {
 				// Native references do not accept public detail or extensions.
@@ -190,10 +230,66 @@ func normalizeBPSImageReferences(input []json.RawMessage) (bool, error) {
 	return changed, nil
 }
 
-func inspectInlineImages(input []json.RawMessage) ([]attachmentRewrite, error) {
+type inlineImageBudget struct {
+	bps                   bool
+	count, total, encoded int
+}
+
+func (b *inlineImageBudget) addReference(encoded int) error {
+	limit := maxInlineImages
+	if b.bps {
+		limit = maxBPSInlineImages
+	}
+	b.count++
+	if b.count > limit {
+		return imageLimit("reference_count", limit, b.count)
+	}
+	if b.bps {
+		if encoded > maxBPSInlineEncodedBytes-b.encoded {
+			return imageLimit("encoded_bytes", maxBPSInlineEncodedBytes, b.encoded+encoded)
+		}
+		b.encoded += encoded
+	}
+	return nil
+}
+func (b *inlineImageBudget) addDecoded(size int, unique bool) error {
+	limit, kind := maxInlineImageTotal, "total_bytes"
+	if b.bps {
+		if !unique {
+			return nil
+		}
+		limit, kind = maxBPSInlineUniqueBytes, "unique_bytes"
+	}
+	if size > limit-b.total {
+		return imageLimit(kind, limit, b.total+size)
+	}
+	b.total += size
+	return nil
+}
+
+func inspectInlineImages(ctx context.Context, input []json.RawMessage, bps bool) ([]attachmentRewrite, error) {
 	var rewrites []attachmentRewrite
-	var count, total int
+	budget := inlineImageBudget{bps: bps}
+	byteLimit := maxInlineImageBytes
+	if bps {
+		byteLimit = maxBPSInlineImageBytes
+	}
+	type contentKey struct {
+		mime   string
+		digest [sha256.Size]byte
+	}
+	unique := make(map[contentKey]*inlineImageContent)
+	// Exact duplicate encodings need neither repeated hashing nor decoding.
+	// Equivalent encodings (case/CRLF) converge on the decoded content digest.
+	type encodedKey struct {
+		mime   string
+		digest [sha256.Size]byte
+	}
+	encodings := make(map[encodedKey]*inlineImageContent)
 	for itemIndex, rawItem := range input {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		var item map[string]json.RawMessage
 		if json.Unmarshal(rawItem, &item) != nil {
 			continue
@@ -215,17 +311,38 @@ func inspectInlineImages(input []json.RawMessage) ([]attachmentRewrite, error) {
 				if part == nil {
 					continue
 				}
-				if count == maxInlineImages {
-					return nil, ErrInlineImageLimit
+				if err := budget.addReference(len(source)); err != nil {
+					return nil, err
 				}
-				image, err := decodeInlineImage(source, maxInlineImageTotal-total)
+				content, err := parseInlineImageSource(source)
 				if err != nil {
 					return nil, err
 				}
-				image.partIndex, image.part = index, part
-				rewrite.images = append(rewrite.images, image)
-				total += len(image.data)
-				count++
+				if !bps && len(content.encoded) > base64.StdEncoding.EncodedLen(min(byteLimit, maxInlineImageTotal-budget.total)) {
+					return nil, imageLimit("encoded_image_bytes", base64.StdEncoding.EncodedLen(min(byteLimit, maxInlineImageTotal-budget.total)), len(content.encoded))
+				}
+				newContent := false
+				encodedIdentity := encodedKey{content.mimeType, inlineEncodedDigest(content.encoded)}
+				if cached := encodings[encodedIdentity]; cached != nil {
+					content = cached
+				} else {
+					if err := inspectInlineImage(ctx, content, byteLimit); err != nil {
+						return nil, err
+					}
+					identity := contentKey{content.mimeType, content.digest}
+					if cached := unique[identity]; cached != nil {
+						content = cached
+					} else {
+						unique[identity] = content
+						newContent = true
+					}
+					encodings[encodedIdentity] = content
+				}
+				if err := budget.addDecoded(content.bytes, newContent); err != nil {
+					return nil, err
+				}
+				delete(part, "image_url")
+				rewrite.images = append(rewrite.images, inlineImage{partIndex: index, part: part, content: content})
 			}
 			if len(rewrite.images) > 0 {
 				rewrites = append(rewrites, rewrite)
@@ -253,11 +370,14 @@ func inlineImageSource(raw json.RawMessage) (map[string]json.RawMessage, string)
 	return part, source
 }
 
-func decodeInlineImage(source string, remaining int) (inlineImage, error) {
+func parseInlineImageSource(source string) (*inlineImageContent, error) {
+	if len(source) < len("data:") || !strings.EqualFold(source[:len("data:")], "data:") {
+		return nil, ErrInvalidInlineImage
+	}
 	media, encoded, found := strings.Cut(source[len("data:"):], ",")
 	mimeType, base64Data := strings.CutSuffix(strings.ToLower(media), ";base64")
 	if !found || !base64Data || encoded == "" {
-		return inlineImage{}, ErrInvalidInlineImage
+		return nil, ErrInvalidInlineImage
 	}
 	var extension string
 	switch mimeType {
@@ -270,24 +390,81 @@ func decodeInlineImage(source string, remaining int) (inlineImage, error) {
 	case "image/webp":
 		extension = ".webp"
 	default:
-		return inlineImage{}, ErrInvalidInlineImage
+		return nil, ErrInvalidInlineImage
 	}
-	limit := min(maxInlineImageBytes, remaining)
-	if len(encoded) > base64.StdEncoding.EncodedLen(limit) {
-		return inlineImage{}, ErrInlineImageLimit
+	return &inlineImageContent{encoded: encoded, mimeType: mimeType, extension: extension}, nil
+}
+
+func inlineEncodedDigest(source string) [sha256.Size]byte {
+	hash := sha256.New()
+	var buffer [32 << 10]byte
+	for len(source) > 0 {
+		n := copy(buffer[:], source)
+		_, _ = hash.Write(buffer[:n])
+		source = source[n:]
 	}
-	image, err := base64.StdEncoding.Strict().DecodeString(encoded)
-	if err != nil || http.DetectContentType(image) != mimeType {
-		return inlineImage{}, ErrInvalidInlineImage
+	var digest [sha256.Size]byte
+	copy(digest[:], hash.Sum(nil))
+	return digest
+}
+
+type inlineImageReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r inlineImageReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
 	}
-	if len(image) > limit {
-		return inlineImage{}, ErrInlineImageLimit
+	return r.reader.Read(p)
+}
+
+// Validate and fingerprint one image without retaining its decoded bytes. A
+// decoder cannot read past limit+1, even for malformed or padded large inputs.
+func inspectInlineImage(ctx context.Context, image *inlineImageContent, limit int) error {
+	decoder := base64.NewDecoder(base64.StdEncoding.Strict(), strings.NewReader(image.encoded))
+	reader := io.LimitReader(decoder, int64(limit)+1)
+	hash := sha256.New()
+	var prefix [512]byte
+	prefixSize, total := 0, 0
+	var buffer [32 << 10]byte
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		n, err := reader.Read(buffer[:])
+		if n > 0 {
+			total += n
+			if total > limit {
+				return imageLimit("image_bytes", limit, total)
+			}
+			prefixSize += copy(prefix[prefixSize:], buffer[:n])
+			_, _ = hash.Write(buffer[:n])
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return ErrInvalidInlineImage
+		}
 	}
-	return inlineImage{data: image, mimeType: mimeType, extension: extension}, nil
+	if http.DetectContentType(prefix[:prefixSize]) != image.mimeType {
+		return ErrInvalidInlineImage
+	}
+	image.bytes = total
+	copy(image.digest[:], hash.Sum(nil))
+	return nil
 }
 
 func (c *Client) uploadImage(ctx context.Context, endpoint, token string, image inlineImage, bps bool) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	var body bytes.Buffer
+	// One pre-sized multipart buffer owns the decoded image only for this
+	// serial cache miss. Preflight and other image descriptors retain no bytes.
+	body.Grow(image.content.bytes + 2048)
 	form := multipart.NewWriter(&body)
 	fields := [][2]string{
 		{"purpose", "vision"},
@@ -306,14 +483,18 @@ func (c *Client) uploadImage(ctx context.Context, endpoint, token string, image 
 	}
 	header := textproto.MIMEHeader{}
 	header.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{
-		"name": "file", "filename": "image" + image.extension,
+		"name": "file", "filename": "image" + image.content.extension,
 	}))
-	header.Set("Content-Type", image.mimeType)
+	header.Set("Content-Type", image.content.mimeType)
 	part, err := form.CreatePart(header)
 	if err != nil {
 		return "", ErrImageUpload
 	}
-	if _, err := part.Write(image.data); err != nil {
+	decoder := base64.NewDecoder(base64.StdEncoding.Strict(), strings.NewReader(image.content.encoded))
+	if copied, err := io.Copy(part, inlineImageReader{ctx, io.LimitReader(decoder, int64(image.content.bytes)+1)}); err != nil || copied != int64(image.content.bytes) {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
 		return "", ErrImageUpload
 	}
 	if err := form.Close(); err != nil {

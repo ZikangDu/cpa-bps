@@ -65,7 +65,10 @@ supports inline document parsing when the helper is installed, but does not add
 Each request accepts at most four documents and 40 MiB of decoded document data;
 each file is at most 20 MiB. Excel extraction is bounded to 32 sheets and 20000
 populated cells. PDF extraction is bounded to 100 pages, with at most eight
-rendered pages and 16 MiB of page images. Extracted document text is limited to
+newly rendered pages and 16 MiB of newly rendered page images across the request.
+Existing conversation images do not consume this document-rendering budget; the
+final combined request is checked against the BPS attachment budgets described
+in [the image limits](README.md#图片工具和额度). Extracted document text is limited to
 512 KiB across the request. Any omitted content is explicitly marked with file
 and page coverage; the prompt instructs the model not to imply full-document
 coverage. These are limits, not promises of unlimited file analysis.

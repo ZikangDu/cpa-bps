@@ -59,13 +59,13 @@ func attachmentCacheKey(endpoint, token string, image inlineImage, bps bool) [sh
 	if bps {
 		protocol = "bps"
 	}
-	for _, field := range []string{endpoint, token, image.mimeType, protocol} {
+	for _, field := range []string{"attachment-digest-v2", endpoint, token, image.content.mimeType, protocol} {
 		var size [8]byte
 		binary.BigEndian.PutUint64(size[:], uint64(len(field)))
 		_, _ = hash.Write(size[:])
 		_, _ = hash.Write([]byte(field))
 	}
-	_, _ = hash.Write(image.data)
+	_, _ = hash.Write(image.content.digest[:])
 	var key [sha256.Size]byte
 	copy(key[:], hash.Sum(nil))
 	return key

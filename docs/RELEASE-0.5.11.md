@@ -193,3 +193,41 @@ still disabled and other configuration fields unchanged. The public application
 script and styles match the verified bundle; both container copies have SHA-256
 `e7453e1a1005176a5609a2f70eadcc63ea0a9e367e5e6e61352328fff39fed54`.
 The prior deployment and quality configuration are retained for rollback.
+
+## Same-version inline image history correction
+
+The reported `bps_inline_image_limit` at 2026-11-22 12:48 (Asia/Shanghai) came
+from a `gpt-6-astra` request with 94 history items and 23 different PNG images
+inside six custom-tool results. The images totaled 5,190,392 decoded bytes; the
+largest was 327,441 bytes. It hit the reconstruction's eight-inline-image gate,
+not an upstream size rejection. No generation was sent for that failed request.
+
+Original 0.5.31 offline ABI captures confirmed 100 different images, 1024
+repeated image references with one upload, and 24 MiB of total image bytes. Its
+per-image boundary is exactly 20 MiB, not the reconstruction's old 5 MiB.
+
+BPS now permits 1024 inline references and 20 MiB per image, with separate local
+guards of 64 MiB unique decoded content and 96 MiB encoded data URIs including
+repeats. These aggregate guards deliberately bound proxy resource use; they are
+not claimed as upstream maxima. The generic Files path retains its previous
+8/5/16 limits. Preflight streams strict Base64 through a small hashing/sniffing
+buffer and retains encoded descriptors rather than every decoded image. Only
+serial cache misses decode into one multipart buffer. Same-request deduplication
+also survives global cache eviction. All history positions and call associations
+remain; no image is dropped or resized. Credential/origin/protocol partitioning,
+TTL, cancellation and bounded singleflight behavior remain in force.
+
+Errors retain the `bps_inline_image_limit` code but identify the budget and its
+numeric boundary without exposing image contents. Document rendering keeps its
+own eight-page-image / 16 MiB request budget; existing screenshots and file
+references no longer silently consume it.
+
+The old/new native-ABI comparison covers auto/native/text modes: the old build
+rejects both 23 and 100 images before upload, while the new build passes 27
+scenario groups (81 successful synthetic generations). Cases include 100 unique
+images cold/hot, 100 duplicates with one upload, a malformed last image with zero
+uploads/generations, 20 concurrent requests, cancellation and account isolation.
+Boundary tests cover 20 MiB, 64 MiB, 96 MiB and 1024 references, plus padding/CRLF
+and equivalent encodings. Strict Base64 property fuzz completed 305,564 executions.
+Fixture-only test libraries are never deployment artifacts. Live acceptance and
+final deployment provenance are recorded separately after completion.

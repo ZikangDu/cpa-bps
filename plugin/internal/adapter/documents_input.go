@@ -18,7 +18,11 @@ import (
 	"cpa-bps-reconstruction/internal/documents"
 )
 
-const maxDocumentsPerRequest = 4
+const (
+	maxDocumentsPerRequest       = 4
+	maxDocumentVisualsPerRequest = 8
+	maxDocumentVisualBytes       = 16 << 20
+)
 
 type documentInput struct {
 	Filename string
@@ -52,7 +56,9 @@ func (r *Runtime) prepareDocuments(cfg config, req executionRequest, payload []b
 	ctx, cancel := context.WithTimeout(parent, 60*time.Second)
 	defer cancel()
 	state := &documentRequest{runtime: r, cfg: cfg, request: req, ctx: ctx, scope: scope, seen: map[string]bool{}}
-	state.images, state.imageBytes = countExistingDocumentImages(body["input"])
+	// This budget bounds only the document visuals generated in this request.
+	// Existing user/tool images retain their positions and do not consume it;
+	// the attachment preflight validates the complete resulting image payload.
 	var input []json.RawMessage
 	inputRaw := bytes.TrimSpace(body["input"])
 	if len(inputRaw) == 0 || bytes.Equal(inputRaw, []byte("null")) {
@@ -361,8 +367,8 @@ func (d *documentRequest) document(raw json.RawMessage) ([]json.RawMessage, erro
 	part, _ := json.Marshal(map[string]string{"type": "input_text", "text": text})
 	out := []json.RawMessage{part}
 	for _, image := range result.Images {
-		if d.images >= 8 || d.imageBytes+len(image.PNG) > 16<<20 {
-			warning, _ := json.Marshal(map[string]string{"type": "input_text", "text": fmt.Sprintf("Document visual page %d from %q was omitted because this request reached its image-count or image-byte limit.", image.Page, file.Filename)})
+		if d.images >= maxDocumentVisualsPerRequest || d.imageBytes+len(image.PNG) > maxDocumentVisualBytes {
+			warning, _ := json.Marshal(map[string]string{"type": "input_text", "text": fmt.Sprintf("Document visual page %d from %q was omitted because this request reached its document-rendering image-count or image-byte limit.", image.Page, file.Filename)})
 			out = append(out, warning)
 			continue
 		}
@@ -373,36 +379,6 @@ func (d *documentRequest) document(raw json.RawMessage) ([]json.RawMessage, erro
 		d.imageBytes += len(image.PNG)
 	}
 	return out, nil
-}
-
-func countExistingDocumentImages(raw json.RawMessage) (count, size int) {
-	var input []map[string]json.RawMessage
-	if json.Unmarshal(raw, &input) != nil {
-		return
-	}
-	for _, item := range input {
-		for _, field := range []string{"content", "output"} {
-			var parts []struct {
-				Type string `json:"type"`
-				URL  string `json:"image_url"`
-			}
-			if json.Unmarshal(item[field], &parts) != nil {
-				continue
-			}
-			for _, part := range parts {
-				if part.Type != "input_image" {
-					continue
-				}
-				count++
-				if strings.HasPrefix(part.URL, "data:") {
-					if _, data, ok := strings.Cut(part.URL, ","); ok {
-						size += base64.StdEncoding.DecodedLen(len(data))
-					}
-				}
-			}
-		}
-	}
-	return
 }
 
 func (d *documentRequest) resolve(raw json.RawMessage) (documentInput, error) {

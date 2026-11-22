@@ -166,11 +166,19 @@ func TestRewriteInlineImagesPreflightsAllAttachments(t *testing.T) {
 func TestDecodeInlineImageEnforcesRemainingBudget(t *testing.T) {
 	imageBytes := fixturePNG(t)
 	source := "data:image/png;base64," + base64.StdEncoding.EncodeToString(imageBytes)
-	if _, err := decodeInlineImage(source, len(imageBytes)-1); !errors.Is(err, ErrInlineImageLimit) {
+	image, err := parseInlineImageSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := inspectInlineImage(context.Background(), image, len(imageBytes)-1); !errors.Is(err, ErrInlineImageLimit) {
 		t.Fatalf("remaining byte budget error = %v", err)
 	}
 	oversize := "data:image/png;base64," + strings.Repeat("A", base64.StdEncoding.EncodedLen(maxInlineImageBytes)+4)
-	if _, err := decodeInlineImage(oversize, maxInlineImageTotal); !errors.Is(err, ErrInlineImageLimit) {
+	image, err = parseInlineImageSource(oversize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := inspectInlineImage(context.Background(), image, maxInlineImageBytes); !errors.Is(err, ErrInlineImageLimit) {
 		t.Fatalf("single image size error = %v", err)
 	}
 }

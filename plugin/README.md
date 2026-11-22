@@ -124,6 +124,13 @@ CPA 保存授权凭据并调度续期，重建版对同一账号和凭据版本�
 
 ## 图片、工具和额度
 
+BPS 内联图片支持 100 张不同图片和多轮工具截图：最多 1024 个内联引用，
+单张解码后最多 20 MiB，去重后的图片合计最多 64 MiB；包含重复历史的
+全部 data URI 编码数据最多 96 MiB。重复内容只上传一次，但每个图片位置
+和工具调用关联都保留。预检采用流式解码，所有图片验证完成后才上传。
+超限错误会说明图片数量、单图大小、去重总量或编码总量的具体预算。
+通用 `files_url` 路径仍采用原来的 8 张／5 MiB／16 MiB限制。
+
 - BPS 预设会将输入转换为 BPS 请求格式，并把上游流式结果转换回 Responses。BPS 内联图片使用同源的附件上传接口，返回的文件引用继续用于该账号请求。
 - 当前 BPS 工具目录使用客户端工具的 JSON 消息协议。模型生成调用名称和参数，插件校验声明与 Schema 后转换为 Responses 工具事件，工具结果按同一协议回传。含工具的回合等待终态校验后交付。
 - 可选的 `files_url` 接受标准 Files API 格式的图片上传。配置后，内联图片会先校验格式，再上传并以 `file_id` 发送给 Responses 上游。现有 HTTPS 图片和文件 ID 可原样使用。 [Files API](https://developers.openai.com/api/reference/resources/files/methods/create) · [图片输入](https://developers.openai.com/api/docs/guides/images-vision)

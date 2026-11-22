@@ -377,7 +377,7 @@ func (r *Runtime) open(cfg config, req executionRequest, payload []byte, stream 
 			case errors.Is(err, upstream.ErrInvalidInlineImage):
 				return nil, nil, nil, failure(http.StatusBadRequest, "bps_invalid_inline_image", "inline image format is invalid or unsupported")
 			case errors.Is(err, upstream.ErrInlineImageLimit):
-				return nil, nil, nil, failure(http.StatusRequestEntityTooLarge, "bps_inline_image_limit", "inline images exceed the supported limits")
+				return nil, nil, nil, inlineImageLimitError(err)
 			default:
 				return nil, nil, nil, interrupted("bps_image_upload_failed", "an inline image could not be uploaded to the configured Files API")
 			}

@@ -41,12 +41,12 @@ func TestAttachmentCacheDeduplicatesConcurrentUploads(t *testing.T) {
 }
 
 func TestAttachmentCacheKeepsCredentialOriginAndContentSeparate(t *testing.T) {
-	image := inlineImage{mimeType: "image/png", data: []byte("fixture-image")}
+	image := inlineImage{content: &inlineImageContent{mimeType: "image/png", digest: sha256.Sum256([]byte("fixture-image"))}}
 	base := attachmentCacheKey("https://origin.example/files", "account-a-token", image, false)
 	otherContent := image
-	otherContent.data = []byte("different-image")
+	otherContent.content = &inlineImageContent{mimeType: "image/png", digest: sha256.Sum256([]byte("different-image"))}
 	otherFormat := image
-	otherFormat.mimeType = "image/jpeg"
+	otherFormat.content = &inlineImageContent{mimeType: "image/jpeg", digest: image.content.digest}
 	keys := [][32]byte{
 		attachmentCacheKey("https://other.example/files", "account-a-token", image, false),
 		attachmentCacheKey("https://origin.example/other", "account-a-token", image, false),
