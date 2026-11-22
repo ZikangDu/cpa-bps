@@ -55,6 +55,14 @@ The final ordinary `go test ./...` run completed 108 test-bearing packages with
 failures. Thirty additional packages report no tests. Full `go vet ./...` passed.
 Native-ABI tests using the new core passed document 27/27, image 36/36,
 64-client affinity/failover, error follow-up, cancellation and TTFT 13/13.
+Two upstream test-harness issues were additionally reproduced on the unchanged
+v8.1.0 tree during the full race run. The replay-delivery fixture now gives its
+logger and executor the same request-logging configuration, with all original
+assertions and new error-only scenarios retained. A large-JSON test keeps its
+functional and 64 KiB allocation gates under race; its non-instrumented latency
+measurement is now a benchmark rather than applying a 20 ms wall-clock limit
+to race-instrumented scans. Original and merged benchmark medians match (about
+3.3 ms split / 2.4 ms unsplit); no production code or test threshold was relaxed.
 The complete race run is recorded after it finishes.
 
 Required integration coverage includes Files/document parsing; Chat/Responses

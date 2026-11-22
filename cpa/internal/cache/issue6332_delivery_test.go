@@ -26,8 +26,20 @@ import (
 )
 
 func TestIssue6332ReplayCommitPrecedesCompletion(t *testing.T) {
-	for _, mode := range []string{"held_open", "clean_eof", "internal_eof"} {
-		t.Run(mode, func(t *testing.T) {
+	for _, scenario := range []struct {
+		name       string
+		mode       string
+		requestLog bool
+	}{
+		{name: "held_open", mode: "held_open", requestLog: true},
+		{name: "clean_eof", mode: "clean_eof", requestLog: true},
+		{name: "internal_eof", mode: "internal_eof", requestLog: true},
+		{name: "held_open_error_only", mode: "held_open"},
+		{name: "clean_eof_error_only", mode: "clean_eof"},
+		{name: "internal_eof_error_only", mode: "internal_eof"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			mode := scenario.mode
 			const model = "gemini-3.7-flash"
 			signature := strings.Repeat("s", 128)
 			session := t.Name()
@@ -53,18 +65,23 @@ func TestIssue6332ReplayCommitPrecedesCompletion(t *testing.T) {
 				}
 			}))
 			defer server.Close()
+			// Keep executor capture policy, handler configuration and middleware
+			// logger mode consistent, as they are in a configured server. A
+			// mismatched full logger/error-only executor lazily creates capture
+			// state on a pooled Gin context instead of inheriting its holder.
+			cfg := &config.Config{SDKConfig: sdkconfig.SDKConfig{RequestLog: scenario.requestLog}}
 			manager := cliproxyauth.NewManager(nil, nil, nil)
-			manager.RegisterExecutor(runtimeexecutor.NewAntigravityExecutor(&config.Config{}))
+			manager.RegisterExecutor(runtimeexecutor.NewAntigravityExecutor(cfg))
 			auth := &cliproxyauth.Auth{ID: t.Name(), Provider: "antigravity", Status: cliproxyauth.StatusActive, ProxyURL: "direct", Metadata: map[string]any{"access_token": "token", "expired": time.Now().Add(time.Hour).Format(time.RFC3339), "project_id": "project"}, Attributes: map[string]string{"base_url": server.URL}}
 			if _, errRegister := manager.Register(context.Background(), auth); errRegister != nil {
 				t.Fatal(errRegister)
 			}
 			registry.GetGlobalRegistry().RegisterClient(auth.ID, auth.Provider, []*registry.ModelInfo{{ID: model}})
 			t.Cleanup(func() { registry.GetGlobalRegistry().UnregisterClient(auth.ID) })
-			base := handlers.NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, manager)
+			base := handlers.NewBaseAPIHandlers(&cfg.SDKConfig, manager)
 			h := openai.NewOpenAIResponsesAPIHandler(base)
 			router := gin.New()
-			router.Use(logging.CPATraceIDMiddleware(), middleware.RequestLoggingMiddleware(logging.NewFileRequestLogger(true, t.TempDir(), "", 0)))
+			router.Use(logging.CPATraceIDMiddleware(), middleware.RequestLoggingMiddleware(logging.NewFileRequestLogger(scenario.requestLog, t.TempDir(), "", 0)))
 			router.POST("/v1/responses", h.Responses)
 			call := func(payload string) string {
 				t.Helper()

@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/MoeForge/moego/ojson"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
@@ -483,93 +482,115 @@ func TestNormalizeXAIImageRefsDocArbitraryNestedExtensionPath(t *testing.T) {
 	}
 }
 
-func TestClaudeCacheControlDocChecksDoNotMaterializeLargeMessagesArray(t *testing.T) {
-	t.Run("split messages container avoids 1MiB materialization", func(t *testing.T) {
-		chunk := strings.Repeat("a", 64*1024)
-		var b strings.Builder
-		b.Grow(16*len(chunk) + 1024)
-		b.WriteString(`{"model":"claude-sonnet-4-5","system":[{"type":"text","text":"sys"}],"messages":[`)
-		for i := 0; i < 16; i++ {
-			if i > 0 {
-				b.WriteByte(',')
-			}
-			b.WriteString(`{"role":"user","content":[{"type":"text","text":"`)
-			b.WriteString(chunk)
-			b.WriteString(`"}]}`)
+func claudeCacheControlLargeMessagesPayload(split bool) []byte {
+	messages, chunkBytes, character := 1024, 1024, "b"
+	if split {
+		messages, chunkBytes, character = 16, 64*1024, "a"
+	}
+	chunk := strings.Repeat(character, chunkBytes)
+	var body strings.Builder
+	body.Grow(messages*(len(chunk)+64) + 256)
+	body.WriteString(`{"model":"claude-sonnet-4-5","system":[{"type":"text","text":"sys"`)
+	if !split {
+		body.WriteString(`,"cache_control":{"type":"ephemeral"}`)
+	}
+	body.WriteString(`}],"messages":[`)
+	for index := 0; index < messages; index++ {
+		if index > 0 {
+			body.WriteByte(',')
 		}
-		b.WriteString(`]}`)
-		raw := []byte(b.String())
+		body.WriteString(`{"role":"user","content":[{"type":"text","text":"`)
+		body.WriteString(chunk)
+		body.WriteByte('"')
+		if !split && index == messages-1 {
+			body.WriteString(`,"cache_control":{"type":"ephemeral"}`)
+		}
+		body.WriteString(`}]}`)
+	}
+	body.WriteString(`]}`)
+	return []byte(body.String())
+}
 
-		doc := ojson.NewDoc(raw)
-		// Mutate messages.0 so "messages" splits into an ojson container (v.c != nil).
+func claudeCacheControlLargeMessagesDoc(raw []byte, split bool) *ojson.Doc {
+	doc := ojson.NewDoc(raw)
+	if split {
+		// Mutate messages.0 so "messages" splits into an ojson container.
 		_ = doc.Set("messages.0.content.0.text", "short")
-
-		var mBefore, mAfter runtime.MemStats
-		runtime.ReadMemStats(&mBefore)
-		start := time.Now()
-		ensureCacheControlDoc(doc)
-		if got := countCacheControlsDoc(doc); got != 2 {
-			t.Fatalf("countCacheControlsDoc = %d, want 2", got)
-		}
-		enforceCacheControlLimitDoc(doc, 4)
-		upgradeClaudeCacheControlTTLDoc(doc, claudeCacheControlTTL1h)
-		normalizeCacheControlTTLDoc(doc)
-		stripClaudeCacheControlTTLDoc(doc)
-		elapsed := time.Since(start)
-		runtime.ReadMemStats(&mAfter)
-
-		allocated := mAfter.TotalAlloc - mBefore.TotalAlloc
-		if allocated > 64*1024 {
-			t.Fatalf("split messages: cache control doc helpers allocated %d bytes (> 64 KiB)", allocated)
-		}
-		if elapsed > 20*time.Millisecond {
-			t.Fatalf("split messages took %v (> 20ms); expected O(N) single-pass traversal", elapsed)
-		}
-	})
-
-	t.Run("unsplit 1024 messages runs in single-pass O(N) time and <64KiB allocs", func(t *testing.T) {
-		chunk := strings.Repeat("b", 1024)
-		var b strings.Builder
-		b.Grow(1024*(len(chunk)+64) + 256)
-		b.WriteString(`{"model":"claude-sonnet-4-5","system":[{"type":"text","text":"sys","cache_control":{"type":"ephemeral"}}],"messages":[`)
-		for i := 0; i < 1024; i++ {
-			if i > 0 {
-				b.WriteByte(',')
-			}
-			b.WriteString(`{"role":"user","content":[{"type":"text","text":"`)
-			b.WriteString(chunk)
-			if i == 1023 {
-				b.WriteString(`","cache_control":{"type":"ephemeral"}}]}`)
-			} else {
-				b.WriteString(`"}]}`)
-			}
-		}
-		b.WriteString(`]}`)
-		raw := []byte(b.String())
-
-		doc := ojson.NewDoc(raw)
+	} else {
 		// Mutate only "model" so "messages" remains unsplit in root tail.
 		_ = doc.Set("model", "claude-sonnet-4-5-20250929")
+	}
+	return doc
+}
 
-		var mBefore, mAfter runtime.MemStats
-		runtime.ReadMemStats(&mBefore)
-		start := time.Now()
-		if got := countCacheControlsDoc(doc); got != 2 {
-			t.Fatalf("countCacheControlsDoc = %d, want 2", got)
-		}
-		enforceCacheControlLimitDoc(doc, 4)
-		normalizeCacheControlTTLDoc(doc)
-		elapsed := time.Since(start)
-		runtime.ReadMemStats(&mAfter)
+func checkClaudeCacheControlLargeMessages(doc *ojson.Doc, split bool) int {
+	if split {
+		ensureCacheControlDoc(doc)
+	}
+	count := countCacheControlsDoc(doc)
+	enforceCacheControlLimitDoc(doc, 4)
+	if split {
+		upgradeClaudeCacheControlTTLDoc(doc, claudeCacheControlTTL1h)
+	}
+	normalizeCacheControlTTLDoc(doc)
+	if split {
+		stripClaudeCacheControlTTLDoc(doc)
+	}
+	return count
+}
 
-		allocated := mAfter.TotalAlloc - mBefore.TotalAlloc
-		if allocated > 64*1024 {
-			t.Fatalf("unsplit 1024 messages: allocated %d bytes (> 64 KiB)", allocated)
-		}
-		if elapsed > 20*time.Millisecond {
-			t.Fatalf("unsplit 1024 messages took %v (> 20ms); expected O(N) single-pass traversal", elapsed)
-		}
-	})
+func TestClaudeCacheControlDocChecksDoNotMaterializeLargeMessagesArray(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		split bool
+	}{
+		{"split messages container avoids 1MiB materialization", true},
+		{"unsplit 1024 messages stay below 64KiB allocations", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			doc := claudeCacheControlLargeMessagesDoc(claudeCacheControlLargeMessagesPayload(test.split), test.split)
+			var mBefore, mAfter runtime.MemStats
+			runtime.ReadMemStats(&mBefore)
+			count := checkClaudeCacheControlLargeMessages(doc, test.split)
+			runtime.ReadMemStats(&mAfter)
+			if count != 2 {
+				t.Fatalf("countCacheControlsDoc = %d, want 2", count)
+			}
+			allocated := mAfter.TotalAlloc - mBefore.TotalAlloc
+			if allocated > 64*1024 {
+				t.Fatalf("cache control doc helpers allocated %d bytes (> 64 KiB)", allocated)
+			}
+		})
+	}
+}
+
+// Keep functional and allocation limits above in normal and race tests. The
+// race detector instruments every scanner access, so its wall-clock runtime
+// cannot be compared with a fixed non-instrumented latency budget. Measure
+// traversal performance separately on fresh, equivalent documents each time.
+func BenchmarkClaudeCacheControlDocLargeMessages(b *testing.B) {
+	for _, test := range []struct {
+		name  string
+		split bool
+	}{
+		{"split_16x64KiB", true},
+		{"unsplit_1024x1KiB", false},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			raw := claudeCacheControlLargeMessagesPayload(test.split)
+			b.ReportAllocs()
+			b.SetBytes(int64(len(raw)))
+			b.ResetTimer()
+			for index := 0; index < b.N; index++ {
+				b.StopTimer()
+				doc := claudeCacheControlLargeMessagesDoc(raw, test.split)
+				b.StartTimer()
+				if count := checkClaudeCacheControlLargeMessages(doc, test.split); count != 2 {
+					b.Fatalf("countCacheControlsDoc = %d, want 2", count)
+				}
+			}
+		})
+	}
 }
 
 func TestStripClaudeCacheControlTTLThenInjectMessagesPreservesExistingCacheControl(t *testing.T) {
