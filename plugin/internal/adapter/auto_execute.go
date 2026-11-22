@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
+	"sync"
 
 	"cpa-bps-reconstruction/internal/bpsprotocol"
 	"cpa-bps-reconstruction/internal/compat"
@@ -15,51 +16,139 @@ import (
 
 const maxAutomaticAttempts = 3
 
-// A tool request is held until a complete response validates. Cross-protocol
-// fallback only regenerates a demonstrably unexecuted protocol failure, never
-// a request whose transport, permission, quota, or execution outcome is unclear.
-func (r *Runtime) executeAutoBuffered(cfg config, req executionRequest, source []byte, tools compat.ToolCatalog, binding [32]byte, mode string, stream bool) (any, error) {
+// Tools remain withheld until the complete response validates. Optional native
+// final-answer text can commit earlier; after that point no generation replay
+// is permitted. Before commitment, the existing bounded fallback still applies.
+func (r *Runtime) executeAutoBuffered(cfg config, req executionRequest, source []byte, tools compat.ToolCatalog, binding [32]byte, mode string, stream bool, stopRequest func()) (any, error) {
 	parent := r.ctx
 	if req.parentContext != nil {
 		parent = req.parentContext
 	}
 	ctx, cancel := context.WithTimeout(parent, executionWindow)
-	defer cancel()
 	req.parentContext = ctx
+	cleanup := sync.OnceFunc(func() { cancel(); stopRequest(); r.tasks.Done() })
 	transferred := false
 	defer func() {
 		if !transferred {
-			r.tasks.Done()
+			cleanup()
 		}
 	}()
-	prepare := func(mode string) ([]byte, *bpsprotocol.Bridge, error) {
-		return bpsprotocol.PrepareWithOptions(source, bpsCallerScope(req), bpsprotocol.Options{ToolTransport: mode, ToolsVersionID: cfg.BPSToolsVersionID})
-	}
-	payload, bridge, err := prepare(mode)
+	payload, bridge, err := prepareAutomaticPayload(cfg, req, source, mode)
 	if err != nil {
 		return nil, protocolError(err)
+	}
+	cfg.BPSToolTransport = mode
+	response, readCtx, finish, err := r.open(cfg, req, payload, stream)
+	if err != nil {
+		return nil, err
+	}
+	first := autoOpenedResponse{response: response, ctx: readCtx, finish: finish}
+	var final []byte
+	if stream && bridge.CanStreamNativeFinalText() {
+		incremental := newAutoTextStream(tools, func(frame []byte) error {
+			return r.host("host.stream.emit", map[string]any{"stream_id": req.StreamID, "payload": frame}, nil)
+		})
+		type completed struct {
+			body []byte
+			err  error
+		}
+		done := make(chan completed, 1)
+		go func() {
+			body, runErr := r.runAutomaticAttempts(cfg, req, source, tools, binding, mode, stream, payload, bridge, first, incremental)
+			if !incremental.activated {
+				done <- completed{body, runErr}
+				return
+			}
+			defer cleanup()
+			if runErr == nil {
+				runErr = incremental.complete()
+			}
+			r.closeAutomaticStream(req.StreamID, runErr)
+		}()
+		select {
+		case <-incremental.ready:
+			// The reader cannot emit into the host stream until its RPC is
+			// about to return, so a long prefix cannot deadlock the bridge.
+			transferred = true
+			close(incremental.resume)
+			return map[string]any{"headers": http.Header{"Content-Type": {eventStream}}}, nil
+		case result := <-done:
+			final, err = result.body, result.err
+		}
+	} else {
+		final, err = r.runAutomaticAttempts(cfg, req, source, tools, binding, mode, stream, payload, bridge, first, nil)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !stream {
+		return map[string]any{"Payload": final, "Headers": http.Header{"Content-Type": {"application/json"}}}, nil
+	}
+	frames, err := bpsprotocol.ResponseStream(final)
+	if err != nil {
+		return nil, protocolError(err)
+	}
+	transferred = true
+	go func() {
+		defer cleanup()
+		for _, frame := range bytes.Split(frames, []byte("\n\n")) {
+			if len(frame) == 0 || bytes.Equal(frame, []byte("data: [DONE]")) {
+				continue
+			}
+			if r.host("host.stream.emit", map[string]any{"stream_id": req.StreamID, "payload": append(frame, '\n', '\n')}, nil) != nil {
+				return
+			}
+		}
+		_ = r.host("host.stream.close", map[string]any{"stream_id": req.StreamID}, nil)
+	}()
+	return map[string]any{"headers": http.Header{"Content-Type": {eventStream}}}, nil
+}
+
+type autoOpenedResponse struct {
+	response *http.Response
+	ctx      context.Context
+	finish   func()
+}
+
+func prepareAutomaticPayload(cfg config, req executionRequest, source []byte, mode string) ([]byte, *bpsprotocol.Bridge, error) {
+	return bpsprotocol.PrepareWithOptions(source, bpsCallerScope(req), bpsprotocol.Options{ToolTransport: mode, ToolsVersionID: cfg.BPSToolsVersionID})
+}
+
+func (r *Runtime) runAutomaticAttempts(cfg config, req executionRequest, source []byte, tools compat.ToolCatalog, binding [32]byte, mode string, stream bool, payload []byte, bridge *bpsprotocol.Bridge, first autoOpenedResponse, incremental *autoTextStream) ([]byte, error) {
+	prepare := func(mode string) ([]byte, *bpsprotocol.Bridge, error) {
+		return prepareAutomaticPayload(cfg, req, source, mode)
 	}
 	var earlier [][]byte
 	switched := false
 	repairs := 0
 	for attempt := 0; attempt < maxAutomaticAttempts; attempt++ {
 		cfg.BPSToolTransport = mode
-		response, readCtx, finish, err := r.open(cfg, req, payload, stream)
-		if err != nil {
-			return nil, err
+		response, readCtx, finish := first.response, first.ctx, first.finish
+		if attempt > 0 {
+			var openErr error
+			response, readCtx, finish, openErr = r.open(cfg, req, payload, stream)
+			if openErr != nil {
+				return nil, openErr
+			}
 		}
+		var emit func([]byte) error
+		if incremental != nil {
+			incremental.beginAttempt(bridge.CanStreamNativeFinalText())
+			emit = incremental.accept
+		}
+		var err error
 		kind, _, _ := mime.ParseMediaType(response.Header.Get("Content-Type"))
 		var body []byte
 		if kind == eventStream {
-			body, err = upstream.ReadEvents(readCtx, response.Body, nil)
+			body, err = upstream.ReadEvents(readCtx, response.Body, emit)
 		} else {
-			body, err = upstream.ReadJSON(response.Body)
+			body, err = upstream.ReadResponseJSON(response.Body)
 		}
 		if err != nil {
-			r.observeStreamQuotaRejection(readCtx, cfg, req, err)
 			problem := resultError(readCtx, err, "bps_stream_interrupted")
-			response.Body.Close()
-			finish()
+			releaseGeneration := sync.OnceFunc(func() { response.Body.Close(); finish() })
+			r.observeStreamQuotaRejection(readCtx, cfg, req, err, releaseGeneration)
+			releaseGeneration()
 			return nil, problem
 		}
 		response.Body.Close()
@@ -78,7 +167,7 @@ func (r *Runtime) executeAutoBuffered(cfg config, req executionRequest, source [
 			}
 		}
 		if transformErr != nil {
-			if attempt+1 < maxAutomaticAttempts && bpsprotocol.CanFallbackToolResponse(body, transformErr) && !autoHistoryConflict(source, body) {
+			if (incremental == nil || !incremental.activated) && attempt+1 < maxAutomaticAttempts && bpsprotocol.CanFallbackToolResponse(body, transformErr) && !autoHistoryConflict(source, body) {
 				if !switched {
 					next := "native"
 					if mode == "native" {
@@ -114,6 +203,11 @@ func (r *Runtime) executeAutoBuffered(cfg config, req executionRequest, source [
 		if mergeErr != nil {
 			return nil, interrupted("bps_invalid_usage", "The upstream usage metadata could not be normalized.")
 		}
+		if incremental != nil && incremental.activated {
+			if err := incremental.prepareTerminal(final); err != nil {
+				return nil, interrupted("bps_invalid_tool_response", "The final response contradicted its delivered text or output order.")
+			}
+		}
 		var terminal struct {
 			Status string `json:"status"`
 		}
@@ -122,27 +216,7 @@ func (r *Runtime) executeAutoBuffered(cfg config, req executionRequest, source [
 			r.transports.learn(binding, mode)
 			r.observeCompleted(req.AuthID)
 		}
-		if !stream {
-			return map[string]any{"Payload": []byte(final), "Headers": http.Header{"Content-Type": {"application/json"}}}, nil
-		}
-		frames, err := bpsprotocol.ResponseStream(final)
-		if err != nil {
-			return nil, protocolError(err)
-		}
-		transferred = true
-		go func() {
-			defer r.tasks.Done()
-			for _, frame := range bytes.Split(frames, []byte("\n\n")) {
-				if len(frame) == 0 || bytes.Equal(frame, []byte("data: [DONE]")) {
-					continue
-				}
-				if r.host("host.stream.emit", map[string]any{"stream_id": req.StreamID, "payload": append(frame, '\n', '\n')}, nil) != nil {
-					return
-				}
-			}
-			_ = r.host("host.stream.close", map[string]any{"stream_id": req.StreamID}, nil)
-		}()
-		return map[string]any{"headers": http.Header{"Content-Type": {eventStream}}}, nil
+		return final, nil
 	}
 	return nil, interrupted("bps_tool_protocol_unavailable", "The upstream did not satisfy the tool protocol within the bounded compatibility attempts.")
 }

@@ -191,3 +191,29 @@ func TestTSVDocumentDataURIDoesNotRequireFilename(t *testing.T) {
 		t.Fatalf("TSV MIME reference lost its format: %#v, %v", file, err)
 	}
 }
+
+func FuzzInlineDocumentEncodingKeepsIdentityAndFormat(f *testing.F) {
+	f.Add([]byte("A,B\n1,2"), "sales.csv")
+	f.Add([]byte("A\tB\n1\t2"), "report.tsv")
+	f.Add([]byte("%PDF-1.4\nfixture"), "document.pdf")
+	f.Fuzz(func(t *testing.T, data []byte, filename string) {
+		if len(data) == 0 || len(data) > 4096 || len(filename) > 512 || filename == "" {
+			return
+		}
+		encoded := base64.StdEncoding.EncodeToString(data)
+		raw, _ := json.Marshal(map[string]string{"type": "input_file", "filename": filename, "file_data": encoded})
+		uri, _ := json.Marshal(map[string]string{"type": "input_file", "filename": filename, "file_data": "data:application/octet-stream;base64," + encoded})
+		if documentReferenceKey(raw) != documentReferenceKey(uri) {
+			t.Fatal("equivalent inline encodings lost document identity")
+		}
+		d := &documentRequest{}
+		first, err := d.resolve(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		second, err := d.resolve(uri)
+		if err != nil || first.Filename != second.Filename || string(first.Data) != string(second.Data) {
+			t.Fatal("equivalent inline encodings changed parsing format or content")
+		}
+	})
+}

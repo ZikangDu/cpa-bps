@@ -41,8 +41,8 @@ func TestAutoPolicyUsesRequestStructureNotPromptKeywords(t *testing.T) {
 		{"one explicit parallel", `{"tools":[{"type":"function","name":"a"}],"parallel_tool_calls":true}`, "native", true},
 		{"one chosen function", `{"tools":[{"type":"function","name":"a"},{"type":"function","name":"b"}],"tool_choice":{"type":"function","name":"a"}}`, "native", true},
 		{"allowed one", `{"tools":[{"type":"function","name":"a"},{"type":"function","name":"b"}],"tool_choice":{"type":"allowed_tools","tools":[{"type":"function","name":"a"}]}}`, "native", true},
-		{"none", `{"tools":[{"type":"custom","name":"patch"}],"tool_choice":"none"}`, "text", true},
-		{"result history", `{"input":[{"type":"function_call_output","call_id":"x","output":"5"}]}`, "text", true},
+		{"none", `{"tools":[{"type":"custom","name":"patch"}],"tool_choice":"none"}`, "text", false},
+		{"result history", `{"input":[{"type":"function_call_output","call_id":"x","output":"5"}]}`, "text", false},
 		{"dynamic tools", `{"input":[{"type":"additional_tools","tools":[{"type":"custom","name":"patch"}]}]}`, "native", true},
 		{"dynamic overrides kind", `{"tools":[{"type":"custom","name":"patch"}],"input":[{"type":"additional_tools","tools":[{"type":"function","name":"patch"}]}]}`, "native", true},
 		{"hosted not client", `{"tools":[{"type":"web_search"}]}`, "text", false},
@@ -116,7 +116,7 @@ func TestAutoPolicyInfersResultFamilyAfterToolsAreRemoved(t *testing.T) {
 			history = append(history, map[string]any{"type": "function_call_output", "call_id": "c", "output": "5"})
 			followup, _ := json.Marshal(map[string]any{"model": "fixture", "prompt_cache_key": "session", "tool_choice": "none", "input": history})
 			mode, resultKey, buffer := policySelect(t, r, string(followup))
-			if !buffer || mode != "text" || resultKey == key {
+			if buffer || mode != "text" || resultKey == key {
 				t.Fatalf("history failed to isolate a result-only turn: %s", tc.name)
 			}
 			var currentTools []any
@@ -295,8 +295,8 @@ func TestRequiredAndOptionalTransportBindingsStaySeparate(t *testing.T) {
 		body["tool_choice"] = choice
 		raw, _ := json.Marshal(body)
 		mode, key, buffered := policySelect(t, r, string(raw))
-		if !buffered {
-			t.Fatal("tool request lost buffering")
+		if buffered != (choice != "none") {
+			t.Fatal("tool policy selected the wrong buffering boundary")
 		}
 		return mode, key
 	}

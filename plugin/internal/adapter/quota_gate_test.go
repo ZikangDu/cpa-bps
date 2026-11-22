@@ -418,3 +418,69 @@ func TestQuotaGatePost429DoesNotJoinOlderUIQuotaRead(t *testing.T) {
 		t.Fatal("older UI reply cleared current account exhaustion")
 	}
 }
+
+func TestQuotaPendingReleasesEveryRejectedSlotBeforeSlowObservation(t *testing.T) {
+	g := newQuotaGate()
+	now := time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)
+	g.now = func() time.Time { return now }
+	key := [32]byte{17}
+	if err := g.check(t.Context(), key, false, false, func() upstream.BPSQuotaResult {
+		return gateObservation(now, gateBucket("7d", 1, now.Add(time.Hour)))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ownerPending, joinedPending, nextPending := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	releaseFetch := make(chan struct{})
+	release := sync.OnceFunc(func() { close(releaseFetch) })
+	t.Cleanup(release)
+	results := make(chan *rpcError, 3)
+	go func() {
+		results <- g.checkWithPending(t.Context(), key, true, false, func() upstream.BPSQuotaResult {
+			<-releaseFetch
+			return gateObservation(now, gateBucket("7d", 0, now.Add(time.Hour)))
+		}, sync.OnceFunc(func() { close(ownerPending) }))
+	}()
+	select {
+	case <-ownerPending:
+	case <-time.After(time.Second):
+		t.Fatal("owner did not release completed generation slot")
+	}
+	go func() {
+		results <- g.checkWithPending(t.Context(), key, true, false, func() upstream.BPSQuotaResult {
+			t.Error("joining rejection performed a duplicate observation")
+			return upstream.BPSQuotaResult{}
+		}, sync.OnceFunc(func() { close(joinedPending) }))
+	}()
+	select {
+	case <-joinedPending:
+	case <-time.After(time.Second):
+		t.Fatal("joining rejection retained its completed generation slot")
+	}
+	go func() {
+		results <- g.checkWithPending(t.Context(), key, false, false, func() upstream.BPSQuotaResult {
+			t.Error("next dispatch bypassed the pending quota observation")
+			return upstream.BPSQuotaResult{}
+		}, sync.OnceFunc(func() { close(nextPending) }))
+	}()
+	select {
+	case <-nextPending:
+	case <-time.After(time.Second):
+		t.Fatal("next dispatch reused the old positive cache instead of waiting")
+	}
+	select {
+	case err := <-results:
+		t.Fatalf("request escaped before observation completed: %v", err)
+	default:
+	}
+	release()
+	for range 3 {
+		select {
+		case err := <-results:
+			if err == nil || err.PublicCode != "bps_quota_exhausted" {
+				t.Fatalf("exhausted quota lost: %v", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("pending request did not settle")
+		}
+	}
+}

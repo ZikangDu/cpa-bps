@@ -75,17 +75,36 @@ func (r *Runtime) beforeQuotaDispatch(ctx context.Context, cfg config, authID st
 		func() upstream.BPSQuotaResult { return r.fetchDispatchQuota(ctx, cfg, authID, raw, token) })
 }
 
+// A received 429 remains evidence even if its caller disconnects. Only the
+// bounded metadata refresh survives that cancellation; no generation does.
+func (r *Runtime) afterGenerationRejection(ctx context.Context, cfg config, authID string, raw []byte, token string, diagnostic upstream.Rejection, release func()) *rpcError {
+	if diagnostic.HTTPStatus == http.StatusTooManyRequests {
+		observation, cancel := context.WithTimeout(r.ctx, bpsQuotaTimeout)
+		defer cancel()
+		ctx = observation
+	}
+	return r.afterQuotaRejectionWithRelease(ctx, cfg, authID, raw, token, diagnostic, release)
+}
+
 func (r *Runtime) afterQuotaRejection(ctx context.Context, cfg config, authID string, raw []byte, token string, diagnostic upstream.Rejection) *rpcError {
+	return r.afterQuotaRejectionWithRelease(ctx, cfg, authID, raw, token, diagnostic, nil)
+}
+
+func (r *Runtime) afterQuotaRejectionWithRelease(ctx context.Context, cfg config, authID string, raw []byte, token string, diagnostic upstream.Rejection, release func()) *rpcError {
+	if release != nil {
+		release = sync.OnceFunc(release)
+		defer release()
+	}
 	rejected := failure(diagnostic.HTTPStatus, diagnostic.Code, diagnostic.Message)
 	rejected.RetryAfter = diagnostic.RetryAfterSeconds
 	// A permission/authorization refusal must never become a quota cooldown.
 	if diagnostic.HTTPStatus != http.StatusTooManyRequests || !quotaGateEnabled(cfg) {
 		return rejected
 	}
-	if blocked := r.quotaGate.check(ctx, quotaGateKey(cfg, authID, raw, token), true,
+	if blocked := r.quotaGate.checkWithPending(ctx, quotaGateKey(cfg, authID, raw, token), true,
 		diagnostic.Code == "bps_quota_exhausted", func() upstream.BPSQuotaResult {
 			return r.fetchDispatchQuota(ctx, cfg, authID, raw, token)
-		}); blocked != nil {
+		}, release); blocked != nil {
 		return blocked
 	}
 	return rejected
@@ -135,6 +154,13 @@ func (r *Runtime) forgetQuotaGate(cfg config, authID string, raw []byte, token s
 }
 
 func (g *quotaGate) check(ctx context.Context, key [32]byte, rejected, explicitQuota bool, fetch func() upstream.BPSQuotaResult) *rpcError {
+	return g.checkWithPending(ctx, key, rejected, explicitQuota, fetch, nil)
+}
+
+// onPending runs outside the lock after this account has an in-flight metadata
+// observation. Completed generations can release capacity without allowing a
+// newer request through a cached positive observation. Joiners release too.
+func (g *quotaGate) checkWithPending(ctx context.Context, key [32]byte, rejected, explicitQuota bool, fetch func() upstream.BPSQuotaResult, onPending func()) *rpcError {
 	force := rejected
 	for {
 		g.mu.Lock()
@@ -161,6 +187,9 @@ func (g *quotaGate) check(ctx context.Context, key [32]byte, rejected, explicitQ
 		if entry.pending != nil {
 			pending := entry.pending
 			g.mu.Unlock()
+			if onPending != nil {
+				onPending()
+			}
 			select {
 			case <-pending:
 				// A read begun before the rejected request is not necessarily a
@@ -182,6 +211,9 @@ func (g *quotaGate) check(ctx context.Context, key [32]byte, rejected, explicitQ
 		previousZeros := entry.zeroWindows
 		g.mu.Unlock()
 
+		if onPending != nil {
+			onPending()
+		}
 		result := fetch()
 		g.mu.Lock()
 		now = g.now()

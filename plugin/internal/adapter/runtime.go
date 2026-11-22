@@ -16,7 +16,7 @@ import (
 
 const (
 	provider        = "cpa-bps"
-	version         = "0.5.10-reconstructed"
+	version         = "0.5.11-reconstructed"
 	schemaVersion   = 6
 	executionWindow = 600 * time.Second
 	discoveryWindow = 5 * time.Second
@@ -319,7 +319,7 @@ func (r *Runtime) models(raw json.RawMessage) (any, error) {
 	ctx, cancel := context.WithTimeout(r.ctx, 15*time.Second)
 	defer cancel()
 	if cfg.OAuthPreset == "bps" {
-		accountID, _ := upstream.BPSProfile(token)
+		accountID := bpsExecutionAccount(cfg, request.StorageJSON, token)
 		catalog, err := r.client.BPSModels(ctx, token, accountID)
 		if err != nil {
 			return nil, failure(http.StatusBadGateway, "bps_model_discovery_failed", "BPS model discovery did not return a usable catalog")

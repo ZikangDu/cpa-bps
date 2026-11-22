@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"mime"
 	"net/http"
+	"sync"
 
 	"cpa-bps-reconstruction/internal/bpsprotocol"
 	"cpa-bps-reconstruction/internal/compat"
@@ -41,13 +42,13 @@ func (r *Runtime) executeNativeBuffered(cfg config, req executionRequest, payloa
 		if kind == eventStream {
 			body, err = upstream.ReadEvents(ctx, response.Body, nil)
 		} else {
-			body, err = upstream.ReadJSON(response.Body)
+			body, err = upstream.ReadResponseJSON(response.Body)
 		}
 		if err != nil {
-			r.observeStreamQuotaRejection(ctx, cfg, req, err)
 			problem := resultError(ctx, err, "bps_stream_interrupted")
-			response.Body.Close()
-			finish()
+			releaseGeneration := sync.OnceFunc(func() { response.Body.Close(); finish() })
+			r.observeStreamQuotaRejection(ctx, cfg, req, err, releaseGeneration)
+			releaseGeneration()
 			return nil, problem
 		}
 		response.Body.Close()

@@ -18,6 +18,7 @@ func TestSSERejectionRetainsOnlyAllowlistedDiagnostic(t *testing.T) {
 		{"response_error", `{"type":"response.error","error":{"type":"rate_limit_error","message":"SECRET token"}}`, "bps_rate_limited", 429},
 		{"response_error_envelope", `{"type":"response.error","response":{"id":"resp-safe","status":"failed","error":{"code":"rate_limit_exceeded","message":"SECRET token"}}}`, "bps_rate_limited", 429},
 		{"failed_quota", `{"type":"response.failed","sequence_number":5,"response":{"id":"resp-safe","status":"failed","output":[],"error":{"code":"credits_exhausted","message":"SECRET identity"}}}`, "bps_quota_exhausted", 429},
+		{"incomplete_quota", `{"type":"response.incomplete","response":{"id":"resp-safe","status":"incomplete","output":[],"error":{"code":"rate_limit_exceeded","message":"SECRET identity"}}}`, "bps_rate_limited", 429},
 		{"nested_credentials", `{"type":"error","error":{"code":"invalid_token","message":"SECRET token"}}`, "bps_reauthorization_required", 401},
 		{"unknown_code", `{"type":"error","code":"SECRET-code","message":"rate_limit_exceeded SECRET"}`, "bps_upstream_rejected", 502},
 		{"human_text", `{"type":"error","message":"insufficient_quota SECRET","status":429}`, "bps_upstream_rejected", 502},
@@ -66,10 +67,25 @@ func TestSSERejectionTypeFromEventName(t *testing.T) {
 }
 
 func TestSSEUnknownFailedResponseDoesNotInventQuota(t *testing.T) {
-	const raw = "data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"unrecognized\",\"message\":\"quota_exceeded\"}}}\n\n"
-	body, err := ReadEvents(context.Background(), strings.NewReader(raw), nil)
+	const raw = "data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"SECRET_CODE\",\"message\":\"quota_exceeded SECRET account\"}}}\n\n"
+	var delivered string
+	body, err := ReadEvents(context.Background(), strings.NewReader(raw), func(frame []byte) error { delivered += string(frame); return nil })
 	if err != nil || !strings.Contains(string(body), `"status":"failed"`) {
 		t.Fatalf("unknown terminal response changed its existing contract: %s, %v", body, err)
+	}
+	if strings.Contains(string(body), "SECRET") || strings.Contains(delivered, "SECRET") || !strings.Contains(string(body), "bps_upstream_rejected") {
+		t.Fatal("unknown failed response exposed upstream text instead of a generic diagnostic")
+	}
+}
+
+func TestSSECompletedErrorCannotDeliverTools(t *testing.T) {
+	for _, rawError := range []string{`{"code":"rate_limit_exceeded","message":"SECRET account"}`, `"SECRET failure"`, `{}`, `false`} {
+		raw := `data: {"type":"response.completed","response":{"status":"completed","error":` + rawError + `,"output":[{"type":"function_call","name":"run_officejs","call_id":"call-invalid","arguments":"{}"}]}}` + "\n\n"
+		emits := 0
+		body, err := ReadEvents(context.Background(), strings.NewReader(raw), func([]byte) error { emits++; return nil })
+		if body != nil || !errors.Is(err, ErrInvalidEvent) || emits != 0 {
+			t.Fatalf("contradictory successful/error response delivered output: body=%s err=%v emits=%d", body, err, emits)
+		}
 	}
 }
 

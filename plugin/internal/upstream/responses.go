@@ -45,7 +45,7 @@ func ReadJSON(body io.Reader) ([]byte, error) {
 func ReadEvents(ctx context.Context, body io.Reader, emit func(frame []byte) error) (json.RawMessage, error) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 32<<10), maxEventBytes+2)
-	scanner.Split(scanLine)
+	scanner.Split(eventLineSplitter())
 	var frame eventFrame
 	first := true
 	for ctx.Err() == nil && scanner.Scan() {
@@ -84,12 +84,35 @@ func ReadEvents(ctx context.Context, body io.Reader, emit func(frame []byte) err
 	return nil, ErrStreamIncomplete
 }
 
-func scanLine(data []byte, atEOF bool) (int, []byte, error) {
-	advance, token, err := bufio.ScanLines(data, atEOF)
-	if len(token) > maxEventBytes || token == nil && len(data) >= maxEventBytes+2 {
-		return 0, nil, ErrResponseTooLarge
+func eventLineSplitter() bufio.SplitFunc {
+	// SSE allows LF, CRLF and CR. Consume CR immediately so a complete event
+	// on a still-open connection does not wait for another byte. Only a single
+	// subsequent LF is swallowed, including when CRLF straddles reads.
+	skipLF := false
+	return func(data []byte, atEOF bool) (int, []byte, error) {
+		prefix := 0
+		if skipLF && len(data) > 0 {
+			skipLF = false
+			if data[0] == '\n' {
+				prefix = 1
+				data = data[1:]
+			}
+		}
+		if end := bytes.IndexAny(data, "\r\n"); end >= 0 {
+			if end > maxEventBytes {
+				return 0, nil, ErrResponseTooLarge
+			}
+			skipLF = data[end] == '\r'
+			return prefix + end + 1, data[:end], nil
+		}
+		if len(data) > maxEventBytes {
+			return 0, nil, ErrResponseTooLarge
+		}
+		if atEOF && len(data) > 0 {
+			return prefix + len(data), data, nil
+		}
+		return prefix, nil, nil
 	}
-	return advance, token, err
 }
 
 type eventFrame struct {
@@ -158,6 +181,7 @@ func (f *eventFrame) dispatch(emit func([]byte) error) (json.RawMessage, error) 
 		return nil, ErrInvalidEvent
 	}
 	var result json.RawMessage
+	terminalError := false
 	switch event.Type {
 	case "response.completed", "response.incomplete", "response.failed":
 		response := bytes.TrimSpace(event.Response)
@@ -166,6 +190,7 @@ func (f *eventFrame) dispatch(emit func([]byte) error) (json.RawMessage, error) 
 		}
 		var terminal struct {
 			Status json.RawMessage `json:"status"`
+			Error  json.RawMessage `json:"error"`
 		}
 		if json.Unmarshal(response, &terminal) != nil {
 			return nil, ErrInvalidEvent
@@ -178,11 +203,20 @@ func (f *eventFrame) dispatch(emit func([]byte) error) (json.RawMessage, error) 
 				return nil, ErrInvalidEvent
 			}
 		}
+		rawError := bytes.TrimSpace(terminal.Error)
+		terminalError = len(rawError) > 0 && !bytes.Equal(rawError, []byte("null"))
+		if event.Type == "response.completed" && terminalError {
+			return nil, ErrInvalidEvent
+		}
 		result = event.Response
 	}
 	eventErr := describeEventRejection(data, event.Type)
 	if eventErr != nil {
 		data, result = sanitizeEventRejection(data, event.Type, eventErr.Diagnostic)
+	} else if terminalError {
+		// An unknown failed/incomplete response keeps its terminal contract,
+		// but never copies a private upstream error message into client output.
+		data, result = sanitizeEventRejection(data, event.Type, genericEventRejection().Diagnostic)
 	}
 	if emit != nil {
 		if missingType {

@@ -89,7 +89,7 @@ func TestObservedStreamQuotaSurvivesCallerCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	req := executionRequest{AuthID: "fixture-id", StorageJSON: raw}
-	r.observeStreamQuotaRejection(ctx, r.cfg, req, &upstream.EventRejection{Diagnostic: upstream.Rejection{HTTPStatus: 429, Code: "bps_rate_limited", Message: "Rate limited."}})
+	r.observeStreamQuotaRejection(ctx, r.cfg, req, &upstream.EventRejection{Diagnostic: upstream.Rejection{HTTPStatus: 429, Code: "bps_rate_limited", Message: "Rate limited."}}, nil)
 	token, err := resolveToken(raw, r.cfg.ResponsesURL, r.cfg.OAuth)
 	if err != nil {
 		t.Fatal(err)

@@ -198,9 +198,9 @@ func TestBPSHostSessionKeepsAccountCallerModelAndSessionIsolated(t *testing.T) {
 
 func TestBPSHostSessionSurvivesTokenRotationWithinAccount(t *testing.T) {
 	req := sessionCacheRequest(`{"input":"same conversation","prompt_cache_key":"body-cache-hint"}`)
-	req.StorageJSON = []byte(`{"type":"cpa-bps","access_token":"fixture-old-access","refresh_token":"fixture-old-refresh","expires_at":"2026-11-21T12:00:00Z"}`)
+	req.StorageJSON = replayWorkspaceCredential("workspace-stable", "fixture-old-access")
 	before := preparedSessionCacheBody(t, req)
-	req.StorageJSON = []byte(`{"type":"cpa-bps","access_token":"fixture-new-access","refresh_token":"fixture-new-refresh","expires_at":"2026-11-22T12:00:00Z"}`)
+	req.StorageJSON = replayWorkspaceCredential("workspace-stable", "fixture-new-access")
 	after := preparedSessionCacheBody(t, req)
 	var beforeMeta, afterMeta map[string]json.RawMessage
 	_ = json.Unmarshal(before["metadata"], &beforeMeta)

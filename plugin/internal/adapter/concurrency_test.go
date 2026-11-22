@@ -1,13 +1,16 @@
 package adapter
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 )
 
 func concurrencyRuntime(t *testing.T, path string) *Runtime {
@@ -155,5 +158,76 @@ func TestConcurrencySaveFailureLeavesRuntimeLimitIntact(t *testing.T) {
 	}
 	if got := runtime.queue.Snapshot("fixture-auth", 1); got.Limit != 1 {
 		t.Fatal("failed save changed admission capacity")
+	}
+}
+
+func TestConcurrencyManagementResizesSaturatedQueueAndRejectsStaleDefaults(t *testing.T) {
+	r := concurrencyRuntime(t, filepath.Join(t.TempDir(), "policy.json"))
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	first, err := r.queue.Acquire(ctx, "fixture-auth", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first()
+	type admitted struct {
+		release func()
+		err     error
+	}
+	results := make(chan admitted, 3)
+	waitingCtx, cancelWaiting := context.WithCancel(ctx)
+	defer cancelWaiting()
+	for range 3 {
+		go func() {
+			release, err := r.queue.Acquire(waitingCtx, "fixture-auth", 1)
+			results <- admitted{release, err}
+		}()
+	}
+	for r.queue.Snapshot("fixture-auth", 1).Waiting != 3 {
+		if ctx.Err() != nil {
+			t.Fatal(ctx.Err())
+		}
+		runtime.Gosched()
+	}
+	result, err := r.manageConcurrency(concurrencyRequest(http.MethodPost, `{"limit":3}`))
+	if snapshot := concurrencySnapshot(t, result, err); snapshot["active"] != float64(3) || snapshot["waiting"] != float64(1) {
+		t.Fatalf("raising persisted capacity failed: %v", snapshot)
+	}
+	holders := []func(){first}
+	for range 2 {
+		select {
+		case next := <-results:
+			if next.err != nil {
+				t.Fatal(next.err)
+			}
+			holders = append(holders, next.release)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	result, err = r.manageConcurrency(concurrencyRequest(http.MethodPost, `{"limit":1}`))
+	if snapshot := concurrencySnapshot(t, result, err); snapshot["active"] != float64(3) || snapshot["waiting"] != float64(1) {
+		t.Fatalf("lowering capacity canceled existing work or lost waiter: %v", snapshot)
+	}
+	cancelWaiting()
+	select {
+	case next := <-results:
+		if !errors.Is(next.err, context.Canceled) || next.release != nil {
+			t.Fatal("canceled waiter was admitted")
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	stale := r.cfg
+	stale.ConcurrencyLimit = 10000
+	if limit, err := r.accountLimit(stale, "fixture-auth"); err != nil || limit != 1 {
+		t.Fatalf("stale execution restored old default: %d %v", limit, err)
+	}
+	for _, release := range holders {
+		release()
+		release()
+	}
+	if state := r.queue.Snapshot("fixture-auth", 10000); state.Active != 0 || state.Waiting != 0 || state.Limit != 1 {
+		t.Fatalf("resized queue did not drain: %+v", state)
 	}
 }

@@ -7,8 +7,8 @@ import (
 	"strings"
 )
 
-// EventRejection describes an error delivered after HTTP 200 established an
-// SSE stream. HTTPStatus is the semantic status of an exact machine code, not
+// EventRejection describes an error delivered inside an HTTP 200 JSON response
+// or SSE stream. HTTPStatus is the semantic status of an exact machine code, not
 // a replacement for the already-sent HTTP status. No upstream text is retained.
 type EventRejection struct {
 	Diagnostic Rejection
@@ -18,12 +18,12 @@ func (e *EventRejection) Error() string { return e.Diagnostic.Message }
 func (e *EventRejection) Unwrap() error { return ErrUpstreamEvent }
 
 func describeEventRejection(raw []byte, kind string) *EventRejection {
-	if kind != "error" && kind != "response.error" && kind != "response.failed" {
+	if kind != "error" && kind != "response.error" && kind != "response.failed" && kind != "response.incomplete" {
 		return nil
 	}
 	var body map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &body)
-	if kind == "response.failed" || kind == "response.error" && len(body["response"]) > 0 {
+	if kind == "response.failed" || kind == "response.incomplete" || kind == "response.error" && len(body["response"]) > 0 {
 		var response map[string]json.RawMessage
 		_ = json.Unmarshal(body["response"], &response)
 		body = response
@@ -41,11 +41,15 @@ func describeEventRejection(raw []byte, kind string) *EventRejection {
 		diagnostic.DiagnosticShape = nil
 		return &EventRejection{Diagnostic: diagnostic}
 	}
-	if kind == "response.failed" {
+	if kind == "response.failed" || kind == "response.incomplete" {
 		// Preserve the existing terminal response contract for failures that
 		// have no recognized machine code. Never infer quota from human text.
 		return nil
 	}
+	return genericEventRejection()
+}
+
+func genericEventRejection() *EventRejection {
 	return &EventRejection{Diagnostic: Rejection{
 		HTTPStatus: http.StatusBadGateway, Code: "bps_upstream_rejected", BodyFormat: "sse",
 		Message: "The upstream rejected the request without a recognized diagnostic code.",
@@ -74,7 +78,7 @@ func sanitizeEventRejection(raw []byte, kind string, diagnostic Rejection) ([]by
 	var event map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &event)
 	safe, _ := json.Marshal(map[string]any{"code": diagnostic.Code, "message": diagnostic.Message, "type": "server_error", "param": nil})
-	if kind == "response.failed" || kind == "response.error" && len(event["response"]) > 0 {
+	if kind == "response.failed" || kind == "response.incomplete" || kind == "response.error" && len(event["response"]) > 0 {
 		var response map[string]json.RawMessage
 		_ = json.Unmarshal(event["response"], &response)
 		if response == nil {

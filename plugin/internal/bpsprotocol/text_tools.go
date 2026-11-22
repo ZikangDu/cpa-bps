@@ -218,6 +218,9 @@ func (b *Bridge) transformTextTool(response map[string]any) error {
 	default:
 		return fmt.Errorf("unknown client tool kind")
 	}
+	if responseReusesHistoryToolID(b.source, []any{item}) {
+		return historyToolCollisionError()
+	}
 	kept := make([]any, 0, len(output)+1)
 	for index, raw := range output {
 		if index == envelopeIndex {

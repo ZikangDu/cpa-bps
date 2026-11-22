@@ -56,7 +56,7 @@ func DecodeAlternateToolResponse(source, terminal []byte, scope string, primary 
 		return nil, "", false
 	}
 	converted, valid := fallbackObject(out)
-	if !valid || converted["status"] != "completed" || !responseHasClientTool(converted) || alternateHistoryCollision(bridge.source, converted["output"].([]any)) {
+	if !valid || converted["status"] != "completed" || !responseHasClientTool(converted) || responseReusesHistoryToolID(bridge.source, converted["output"].([]any)) {
 		return nil, "", false
 	}
 	return out, mode, true
@@ -95,7 +95,7 @@ func preflightAlternateNative(bridge *Bridge, response map[string]any) bool {
 	if calls == 0 || bridge.source["parallel_tool_calls"] == false && calls > 1 {
 		return false
 	}
-	if alternateHistoryCollision(bridge.source, replaced) {
+	if responseReusesHistoryToolID(bridge.source, replaced) {
 		return false
 	}
 	if bridge.structured != nil {
@@ -108,7 +108,7 @@ func preflightAlternateNative(bridge *Bridge, response map[string]any) bool {
 	return true
 }
 
-func alternateHistoryCollision(source map[string]any, output []any) bool {
+func responseReusesHistoryToolID(source map[string]any, output []any) bool {
 	usedCalls, usedItems := make(map[string]bool), make(map[string]bool)
 	history, _ := source["input"].([]any)
 	for _, raw := range history {

@@ -9,6 +9,7 @@ import (
 	"mime"
 	"net/http"
 	"strings"
+	"sync"
 
 	"cpa-bps-reconstruction/internal/admission"
 	"cpa-bps-reconstruction/internal/bpsprotocol"
@@ -85,7 +86,8 @@ func (r *Runtime) execute(raw json.RawMessage, stream bool) (any, error) {
 				return nil, failure(http.StatusBadRequest, "bps_invalid_tool_catalog", "BPS automatic transport could not validate this request")
 			}
 			if buffered {
-				return r.executeAutoBuffered(cfg, req, payload, tools, key, mode, stream)
+				asyncRequest = true
+				return r.executeAutoBuffered(cfg, req, payload, tools, key, mode, stream, stopRequest)
 			}
 			cfg.BPSToolTransport = mode
 		}
@@ -103,32 +105,35 @@ func (r *Runtime) execute(raw json.RawMessage, stream bool) (any, error) {
 		r.tasks.Done()
 		return nil, err
 	}
-	finish := func() {
+	releaseGeneration := sync.OnceFunc(func() {
 		response.Body.Close()
 		finishOpen()
+	})
+	finish := func() {
+		releaseGeneration()
 		stopRequest()
 		r.tasks.Done()
 	}
 	mediaType, _, _ := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if stream && mediaType == eventStream {
 		asyncRequest = true
-		go r.forward(ctx, cfg, req, tools, bridge, response, finish)
+		go r.forward(ctx, cfg, req, tools, bridge, response, releaseGeneration, finish)
 		return map[string]any{"headers": http.Header{"Content-Type": {eventStream}}}, nil
 	}
 	defer finish()
-	if stream {
-		return nil, interrupted("bps_stream_interrupted", "the upstream did not establish a Responses event stream")
-	}
 	var body []byte
 	var readErr error
 	if mediaType == eventStream {
 		body, readErr = upstream.ReadEvents(ctx, response.Body, nil)
 	} else {
-		body, readErr = upstream.ReadJSON(response.Body)
+		body, readErr = upstream.ReadResponseJSON(response.Body)
 	}
 	if readErr != nil {
-		r.observeStreamQuotaRejection(ctx, cfg, req, readErr)
+		r.observeStreamQuotaRejection(ctx, cfg, req, readErr, releaseGeneration)
 		return nil, resultError(ctx, readErr, "bps_stream_interrupted")
+	}
+	if stream {
+		return nil, interrupted("bps_stream_interrupted", "the upstream did not establish a Responses event stream")
 	}
 	if bridge != nil {
 		body, err = bridge.Transform(body)
@@ -215,7 +220,21 @@ func bpsProtocolOptions(cfg config) bpsprotocol.Options {
 }
 
 func bpsCallerScope(req executionRequest) string {
-	raw, _ := json.Marshal([]any{req.AuthID, req.Metadata["caller_scope"]})
+	// An operator may replace a credential in place while retaining its host
+	// auth ID. Opaque native replay items must stay in the selected workspace;
+	// ordinary token refresh within that workspace should preserve continuity.
+	account := ""
+	if auth, ok := credentialFromStorage(req.StorageJSON); ok && auth.Grant != nil {
+		account, _ = upstream.BPSProfile(auth.Grant.AccessToken)
+		if account == "" {
+			account, _ = upstream.BPSProfile(auth.Grant.IDToken)
+		}
+	}
+	if account == "" {
+		digest := sha256.Sum256(req.StorageJSON)
+		account = "credential:" + hex.EncodeToString(digest[:])
+	}
+	raw, _ := json.Marshal([]any{req.AuthID, req.Metadata["caller_scope"], account})
 	digest := sha256.Sum256(raw)
 	return hex.EncodeToString(digest[:])
 }
@@ -374,7 +393,7 @@ func (r *Runtime) open(cfg config, req executionRequest, payload []byte, stream 
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		diagnostic := upstream.DescribeRejection(response)
 		response.Body.Close()
-		rejected := r.afterQuotaRejection(ctx, cfg, req.AuthID, req.StorageJSON, token, diagnostic)
+		rejected := r.afterGenerationRejection(ctx, cfg, req.AuthID, req.StorageJSON, token, diagnostic, finish)
 		finish()
 		return nil, nil, nil, rejected
 	}
@@ -402,7 +421,7 @@ func bpsExecutionAccount(cfg config, raw []byte, token string) string {
 	return accountID
 }
 
-func (r *Runtime) forward(ctx context.Context, cfg config, req executionRequest, tools compat.ToolCatalog, bridge *bpsprotocol.Bridge, response *http.Response, finish func()) {
+func (r *Runtime) forward(ctx context.Context, cfg config, req executionRequest, tools compat.ToolCatalog, bridge *bpsprotocol.Bridge, response *http.Response, releaseGeneration, finish func()) {
 	defer finish()
 	authID, streamID := req.AuthID, req.StreamID
 	var downstreamClosed bool
@@ -415,7 +434,7 @@ func (r *Runtime) forward(ctx context.Context, cfg config, req executionRequest,
 		emit = bridge.WrapEmitter(emit)
 	}
 	body, err := upstream.ReadEvents(ctx, response.Body, emit)
-	r.observeStreamQuotaRejection(ctx, cfg, req, err)
+	r.observeStreamQuotaRejection(ctx, cfg, req, err, releaseGeneration)
 	if err == nil && bridge != nil {
 		body, err = bridge.Transform(body)
 	}

@@ -46,3 +46,8 @@ returns saved values, not formula source. Large documents have explicit coverage
 limits; unsupported remote URLs are not fetched. The 0.5.10 host/plugin lifecycle bridge now propagates client cancellation to
 queue admission and direct upstream operations; old hosts retain their previous
 lifecycle behavior. See [0.5.10 audit](RELEASE-0.5.10.md).
+
+## Comprehensive 0.5.11 audit
+
+See [RELEASE-0.5.11.md](RELEASE-0.5.11.md) for the original-binary differential
+checks, bounded real-model validation, retained failures and production status.

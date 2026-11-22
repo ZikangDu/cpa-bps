@@ -357,7 +357,8 @@ class ThreeAccountSuite(Suite):
                 "requests": self.reports}
 
 
-def run(cpa, plugin, *, three_account_pool=False, parallel_failover=False, max_retry_credentials=2):
+def run(cpa, plugin, *, three_account_pool=False, parallel_failover=False, max_retry_credentials=2,
+        fixture_type=Fixture, suite_type=None):
     with tempfile.TemporaryDirectory(prefix="cpa-bps-quota-failover-") as workdir:
         root = pathlib.Path(workdir)
         auths, plugins = root / "auths", root / "plugins"
@@ -366,7 +367,7 @@ def run(cpa, plugin, *, three_account_pool=False, parallel_failover=False, max_r
         shutil.copy2(plugin, plugins / ("cpa-bps" + plugin.suffix))
         tokens = {**TOKENS, "account_C": "fixture-quota-token-C"} if three_account_pool else TOKENS
         token_envs = {label: "CPA_BPS_QUOTA_" + label[-1] for label in tokens}
-        with ConcurrentFixtureServer((LOOPBACK, 0), Fixture) as fixture:
+        with ConcurrentFixtureServer((LOOPBACK, 0), fixture_type) as fixture:
             fixture.tokens = tokens
             fixture.lock = threading.Lock()
             fixture.generations, fixture.quota_reads = [], []
@@ -402,7 +403,8 @@ def run(cpa, plugin, *, three_account_pool=False, parallel_failover=False, max_r
                    "HTTP_PROXY": origin, "HTTPS_PROXY": origin, "NO_PROXY": LOOPBACK,
                    **{token_envs[label]: token for label, token in tokens.items()}}
             log_path, process, result = root / "cpa.log", None, None
-            suite = (ThreeAccountSuite(port, fixture, max_retry_credentials) if three_account_pool
+            suite = (suite_type(port, fixture) if suite_type is not None
+                     else ThreeAccountSuite(port, fixture, max_retry_credentials) if three_account_pool
                      else ParallelFailoverSuite(port, fixture) if parallel_failover else Suite(port, fixture))
             try:
                 with log_path.open("wb") as log:

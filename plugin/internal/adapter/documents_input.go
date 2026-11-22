@@ -252,15 +252,18 @@ func documentReferenceKey(raw json.RawMessage) string {
 			item = fields
 		}
 	}
-	var id, data string
+	var id, data, name string
 	_ = json.Unmarshal(item["file_id"], &id)
 	if id != "" {
 		return "id:" + id
 	}
 	_ = json.Unmarshal(item["file_data"], &data)
+	_ = json.Unmarshal(item["filename"], &name)
 	if data != "" && len(data) <= 30<<20 {
+		media := ""
 		if strings.HasPrefix(data, "data:") {
-			if _, value, ok := strings.Cut(data, ","); ok {
+			if header, value, ok := strings.Cut(data, ","); ok {
+				media = strings.TrimSuffix(strings.TrimPrefix(header, "data:"), ";base64")
 				data = value
 			}
 		}
@@ -270,7 +273,9 @@ func documentReferenceKey(raw json.RawMessage) string {
 		}
 		if err == nil {
 			digest := sha256.Sum256(decoded)
-			return "bytes:" + hex.EncodeToString(digest[:])
+			// Unlike a file_id, an inline filename controls parsing and source
+			// attribution. Identical bytes named CSV and TSV are not one file.
+			return "bytes:" + hex.EncodeToString(digest[:]) + ":" + inlineDocumentFilename(name, media, decoded)
 		}
 	}
 	canonical := map[string]json.RawMessage{}
@@ -479,6 +484,11 @@ func (d *documentRequest) resolve(raw json.RawMessage) (documentInput, error) {
 	if len(decoded) == 0 || len(decoded) > documents.MaxFileBytes {
 		return documentInput{}, errors.New("document_size_limit")
 	}
+	name = inlineDocumentFilename(name, media, decoded)
+	return documentInput{Filename: name, Data: decoded}, nil
+}
+
+func inlineDocumentFilename(name, media string, data []byte) string {
 	if name == "" {
 		name = "document"
 		switch media {
@@ -495,10 +505,10 @@ func (d *documentRequest) resolve(raw json.RawMessage) (documentInput, error) {
 		}
 	}
 	name = documents.SafeFilename(name)
-	if filepath.Ext(name) == "" && bytes.HasPrefix(decoded, []byte("%PDF-")) {
+	if filepath.Ext(name) == "" && bytes.HasPrefix(data, []byte("%PDF-")) {
 		name += ".pdf"
 	}
-	return documentInput{Filename: name, Data: decoded}, nil
+	return name
 }
 
 func documentFailure(err error) *rpcError {

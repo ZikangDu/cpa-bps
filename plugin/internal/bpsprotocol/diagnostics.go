@@ -12,10 +12,12 @@ func (e *Error) SafeDiagnostic() (stage, reason string) {
 		return "response_tool_conversion", e.diagnosticReason
 	}
 	switch e.code {
+	case "bps_duplicate_tool_call":
+		return "response_tool_conversion", "reused_history_tool_id"
 	case "bps_invalid_tool_transport", "bps_invalid_tools_version", "bps_invalid_request",
 		"bps_invalid_schema", "bps_invalid_text", "unsupported_continuation", "unsupported_service_tier",
 		"unsupported_model", "invalid_tool_choice", "bps_invalid_agent_message", "invalid_text_config",
-		"invalid_text_format", "unsupported_text_format":
+		"invalid_text_format", "unsupported_text_format", "bps_invalid_parallel_tool_calls", "bps_invalid_tool_history":
 		return "request_validation", e.code
 	case "invalid_upstream_response", "bps_invalid_event", "bps_invalid_response", "bps_invalid_structured_output":
 		return "response_validation", e.code
@@ -39,7 +41,7 @@ func safeRelayReason(reason string) string {
 		"tool_not_allowed_by_tool_choice", "tool_not_in_catalog", "relay_tool_kind_mismatch",
 		"function_transport_not_in_catalog", "missing_call_id", "conflicting_tool_reference", "arguments_schema_mismatch",
 		"direct_tool_not_in_catalog", "direct_tool_kind_mismatch", "direct_arguments_invalid", "direct_custom_input_invalid",
-		"direct_tool_kind_unavailable", "duplicate_call_id", "required_tool_choice_not_satisfied", "parallel_tool_calls_disabled",
+		"direct_tool_kind_unavailable", "duplicate_call_id", "duplicate_output_item_id", "required_tool_choice_not_satisfied", "parallel_tool_calls_disabled",
 		"unexpected_native_tool", "text_tool_not_in_catalog", "text_arguments_invalid", "text_custom_input_invalid", "multiple_text_tool_envelopes", "unsafe_text_tool_response":
 		return first
 	default:

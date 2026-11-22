@@ -359,7 +359,7 @@ func fallbackTransportCall(item map[string]any) map[string]any {
 	if item["type"] == "custom_tool_call" {
 		outerArguments["summary"] = customRelayPrefix + name
 	} else {
-		arguments, _ := parseRelayObject(payload)
+		arguments, _ := parseRelayObject(item["arguments"])
 		if field := historicalFunctionRelayField(name, arguments); field != "" {
 			outerArguments = rawFunctionRelayArguments(name, field, arguments)
 		} else {
@@ -770,6 +770,10 @@ func relayError(reason string) error {
 		diagnosticReason: safeRelayReason(reason)}
 }
 
+func historyToolCollisionError() error {
+	return fail(422, "bps_duplicate_tool_call", "BPS reused a tool identifier from the supplied request history")
+}
+
 func transportEnvelope(native map[string]any, declared map[string]toolSpec) (map[string]any, error) {
 	if stringValue(native["type"]) != "function_call" || !isTransportName(stringValue(native["name"])) {
 		return nil, relayError("outer_not_transport")
@@ -1089,15 +1093,32 @@ func transformResponseBody(body []byte, source map[string]any, scope string) ([]
 	natives := make([]map[string]any, 0)
 	clientCalls := make([]map[string]any, 0)
 	callIDs := map[string]bool{}
+	itemIDs := map[string]bool{}
+	checkItemID := func(item map[string]any) error {
+		id := stringValue(item["id"])
+		if id != "" {
+			if itemIDs[id] {
+				return relayError("duplicate_output_item_id")
+			}
+			itemIDs[id] = true
+		}
+		return nil
+	}
 	for _, value := range output {
 		item := objectValue(value)
 		if item == nil || (stringValue(item["type"]) != "function_call" && stringValue(item["type"]) != "custom_tool_call") {
+			if err := checkItemID(item); err != nil {
+				return nil, nil, false, err
+			}
 			replaced = append(replaced, value)
 			continue
 		}
 		call, err := extractNativeClientToolCallIn(item, specs, declared)
 		if err != nil {
 			// 不把服务器注入工具或损坏的中转载荷交给客户端执行。
+			return nil, nil, false, err
+		}
+		if err := checkItemID(call); err != nil {
 			return nil, nil, false, err
 		}
 		callID := stringValue(call["call_id"])
@@ -1117,6 +1138,9 @@ func transformResponseBody(body []byte, source map[string]any, scope string) ([]
 	}
 	if parallel, ok := source["parallel_tool_calls"].(bool); ok && !parallel && len(natives) > 1 {
 		return nil, nil, false, relayError("parallel_tool_calls_disabled")
+	}
+	if responseReusesHistoryToolID(source, replaced) {
+		return nil, nil, false, historyToolCollisionError()
 	}
 	for index, native := range natives {
 		replay := native

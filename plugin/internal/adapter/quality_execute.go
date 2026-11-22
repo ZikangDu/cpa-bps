@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"mime"
 	"strings"
+	"sync"
 
 	"cpa-bps-reconstruction/internal/bpsprotocol"
 	"cpa-bps-reconstruction/internal/candy"
@@ -128,7 +129,7 @@ func (r *Runtime) runQualityCheck(ctx context.Context, check quality.Check) qual
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		diagnostic := upstream.DescribeRejection(response)
 		response.Body.Close()
-		quotaErr := r.afterQuotaRejection(ctx, cfg, entry.ID, raw, token, diagnostic)
+		quotaErr := r.afterGenerationRejection(ctx, cfg, entry.ID, raw, token, diagnostic, release)
 		code := quotaErr.PublicCode
 		if code == "" {
 			code = quotaErr.Code()
@@ -141,10 +142,10 @@ func (r *Runtime) runQualityCheck(ctx context.Context, check quality.Check) qual
 	if mediaType == eventStream {
 		body, readErr = upstream.ReadEvents(ctx, response.Body, nil)
 	} else {
-		body, readErr = upstream.ReadJSON(response.Body)
+		body, readErr = upstream.ReadResponseJSON(response.Body)
 	}
 	if readErr != nil {
-		r.observeStreamQuotaRejection(ctx, cfg, executionRequest{AuthID: entry.ID, StorageJSON: raw}, readErr)
+		r.observeStreamQuotaRejection(ctx, cfg, executionRequest{AuthID: entry.ID, StorageJSON: raw}, readErr, sync.OnceFunc(func() { response.Body.Close(); release() }))
 		return fail("bps_quality_response_incomplete")
 	}
 	if bridge != nil {

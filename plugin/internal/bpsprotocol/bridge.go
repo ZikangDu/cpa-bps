@@ -67,6 +67,12 @@ func prepare(raw []byte, scope string, options Options) ([]byte, *Bridge, error)
 	if model == "" {
 		return nil, nil, fail(400, "bps_invalid_request", "BPS requires a model")
 	}
+	if err := validateToolPolicy(source); err != nil {
+		return nil, nil, err
+	}
+	if err := validateToolHistory(source); err != nil {
+		return nil, nil, err
+	}
 	if err := validateAgentMessageEncryption(source["input"]); err != nil {
 		return nil, nil, err
 	}
@@ -166,6 +172,10 @@ func (b *Bridge) Transform(raw json.RawMessage) (json.RawMessage, error) {
 // WrapEmitter translates terminal responses before an existing Responses event
 // validator. Provisional native tool events remain withheld by that validator.
 func (b *Bridge) WrapEmitter(emit func([]byte) error) func([]byte) error {
+	var textGate *plainTextStreamGate
+	if b.textTools && b.CanStreamPlainText() {
+		textGate = newPlainTextStreamGate()
+	}
 	return func(frame []byte) error {
 		var data bytes.Buffer
 		for line := range bytes.SplitSeq(frame, []byte("\n")) {
@@ -183,6 +193,9 @@ func (b *Bridge) WrapEmitter(emit func([]byte) error) func([]byte) error {
 		var kind string
 		_ = json.Unmarshal(event["type"], &kind)
 		if kind != "response.completed" && kind != "response.incomplete" {
+			if textGate != nil {
+				return textGate.frame(frame, kind, event, emit)
+			}
 			if (b.structured != nil || b.textTools) && kind != "error" && kind != "response.error" && kind != "response.failed" {
 				return nil
 			}
@@ -192,7 +205,7 @@ func (b *Bridge) WrapEmitter(emit func([]byte) error) func([]byte) error {
 		if err != nil {
 			return err
 		}
-		if b.structured != nil || b.textTools {
+		if b.structured != nil || b.textTools && (textGate == nil || !textGate.started) {
 			final, _ := parseRelayObject(string(body))
 			frames := syntheticStream(final)
 			for _, frame := range bytes.Split(frames, []byte("\n\n")) {
@@ -203,6 +216,17 @@ func (b *Bridge) WrapEmitter(emit func([]byte) error) func([]byte) error {
 				}
 			}
 			return nil
+		}
+		if textGate != nil {
+			if err := textGate.validateTerminal(body); err != nil {
+				return err
+			}
+			if err := textGate.flush(emit); err != nil {
+				return err
+			}
+			if err := textGate.emitFixups(event, emit); err != nil {
+				return err
+			}
 		}
 		event["response"] = body
 		encoded, err := json.Marshal(event)

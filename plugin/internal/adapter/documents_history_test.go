@@ -81,3 +81,17 @@ func TestDocumentPreparationHonorsParentCancellation(t *testing.T) {
 		t.Fatal("canceled request started a document worker")
 	}
 }
+
+func TestDocumentRecoveryDoesNotMergeIdenticalBytesWithDifferentNames(t *testing.T) {
+	r, cfg, _ := documentTestRuntime(t)
+	first := inlineDocument("original.csv", "A,B\n1,2")
+	second := inlineDocument("independent.tsv", "A,B\n1,2")
+	req := executionRequest{OriginalRequest: []byte(`{"input":[{"role":"user","content":[` + string(first) + `]}],"attachments":[` + string(second) + `]}`)}
+	got, err := r.prepareDocuments(cfg, req, documentBody(first))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "original.csv") || !strings.Contains(string(got), "independent.tsv") || strings.Count(string(got), "A2=120") != 2 {
+		t.Fatalf("a separately named/formatted attachment was silently deduplicated: %s", got)
+	}
+}

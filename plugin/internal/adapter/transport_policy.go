@@ -224,6 +224,7 @@ func profileTransportRequest(body map[string]any) transportRequestProfile {
 	// for one optional function; such uncertain output cannot be retried.
 	profile.preferNative = len(callable) > 0
 	if len(callable) == 0 {
+		profile.buffer = false
 		profile.family += "/no_callable_tools"
 	} else if transportToolCallRequired(body) {
 		// Optional text successes do not establish required-call capability.

@@ -9,10 +9,10 @@ that runtime root inside the Git source tree. Existing secrets are retained.
 ```sh
 docker build -f deploy/Dockerfile --target api \
   --build-arg SOURCE_COMMIT="$(git rev-parse HEAD)" \
-  -t local/cpa-bps-rebuilt-api:0.5.10 .
+  -t local/cpa-bps-rebuilt-api:0.5.11 .
 docker build -f deploy/Dockerfile --target manager \
   --build-arg SOURCE_COMMIT="$(git rev-parse HEAD)" \
-  -t local/cpa-bps-rebuilt-manager:0.5.10 .
+  -t local/cpa-bps-rebuilt-manager:0.5.11 .
 ```
 
 The runtime uses Debian/glibc for native plugin loading. The API image includes
@@ -55,10 +55,10 @@ no ports; the verifier connects to the candidate's private Docker network addres
 
 ```sh
 python3 deploy/release.py stage --root /private/deployment-root \
-  --release /private/release-directory --api-image local/cpa-bps-rebuilt-api:0.5.10
+  --release /private/release-directory --api-image local/cpa-bps-rebuilt-api:0.5.11
 python3 deploy/release.py apply --root /private/deployment-root \
-  --release /private/release-directory --api-image local/cpa-bps-rebuilt-api:0.5.10 \
-  --manager-image local/cpa-bps-rebuilt-manager:0.5.10
+  --release /private/release-directory --api-image local/cpa-bps-rebuilt-api:0.5.11 \
+  --manager-image local/cpa-bps-rebuilt-manager:0.5.11
 ```
 
 The stage uses private credential copies on an internal Docker network with no

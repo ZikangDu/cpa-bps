@@ -1,4 +1,4 @@
-# 0.5.10-reconstructed: protocol and lifecycle audit
+# 0.5.10 candidate: protocol and lifecycle audit
 
 This release follows the 0.5.9 production fix with original-plugin comparisons,
 real model requests and isolated concurrency/document tests. The original plugin
@@ -91,3 +91,6 @@ The host full suite retains its known Retry-After assertion mismatch (10 versus
 7), and its pre-existing test vet warning. Do not describe the entire upstream
 CPA suite as green. Final build/live/deployment results are recorded below once
 completed.
+
+The 0.5.10 artifacts remained isolated candidates. Their fixes are included in
+the final [0.5.11 release](RELEASE-0.5.11.md), together with the second audit round.

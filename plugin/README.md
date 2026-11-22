@@ -1,12 +1,19 @@
 # CPA BPS 插件重建版
 
-`0.5.10-reconstructed` 是依据线上 BPS 0.5.31 的请求记录、配置和二进制符号重建的 Go 插件。它复用 CLIProxyAPI 的原生 C ABI，保留插件 ID `cpa-bps`，通过可配置的 Responses 上游运行。0.5.31 的原始 Go 文件仍需发行方提供。
+`0.5.11-reconstructed` 是依据线上 BPS 0.5.31 的请求记录、配置和二进制符号重建的 Go 插件。它复用 CLIProxyAPI 的原生 C ABI，保留插件 ID `cpa-bps`，通过可配置的 Responses 上游运行。0.5.31 的原始 Go 文件仍需发行方提供。
 
 Quota-aware routing now checks account quota before dispatch and refreshes the observation after an upstream HTTP 429. A confirmed zero balance places the entire credential, across models, into cooldown until all exhausted windows reset. CPA can fail over to another available credential and retain session affinity there. When every credential is cooling down, the current request returns HTTP 429 with `Retry-After` instead of repeatedly generating or keeping the connection open. Use `routing.retry.request-retry: 0` and `routing.retry.max-retry-credentials: 0` to inspect each eligible credential at most once in a request, including pools larger than two accounts; keep `session-affinity-rebind-on: any` for automatic failover. At the recovery time, the plugin checks quota again before sending work.
 
 Missing or stale quota never becomes an invented zero balance. After a rejection, an unknown recovery state is rechecked at five-minute intervals without generation; ordinary rate limiting with confirmed remaining quota and HTTP 403 retain their own diagnoses. Manual and scheduled quality checks use the same quota gate without modifying the saved schedule. A successful reset card requests fresh confirmation; uncertain redemption does not unlock the account.
 
 [0.5.3 local release and isolated validation](../docs/VALIDATION.md). Production was not changed.
+
+## Comprehensive compatibility audit in 0.5.11
+
+The original-binary comparison and two audit rounds fixed tool relay selection,
+current native reference requirements, caller cancellation, quota error handling,
+history identity/argument validation, selected-workspace model discovery, SSE
+line endings, and document identity. See [the audit and release record](../docs/RELEASE-0.5.11.md).
 
 ## Account display in 0.5.7
 

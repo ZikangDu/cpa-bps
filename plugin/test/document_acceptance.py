@@ -167,6 +167,18 @@ class Suite:
         with self.upstream.lock:chat_wire=json.dumps(self.upstream.generations[-1])
         require('DOCUMENT_XLSX_FIXTURE_056' in chat_wire,'Chat streaming file was omitted by translation')
         self.cases.append({'case':'chat_completions_stream_file_id','http':code,'passed':True})
+        same_bytes=base64.b64encode(b'A,B\n1,2').decode()
+        chat_named={'model':MODEL,'messages':[{'role':'user','content':[
+            {'type':'text','text':'Compare the two independently named documents.'},
+            {'type':'file','file':{'filename':'first.csv','file_data':same_bytes}}]}],
+            'attachments':[{'filename':'second.tsv','file_data':same_bytes}]}
+        before=self.counts();code,_,raw=call(self.port,'POST','/v1/chat/completions',API_A,chat_named)
+        require(code==200 and ACK.encode() in raw and self.counts()[0]==before[0]+1,
+                'Chat inline document recovery failed')
+        with self.upstream.lock:named_wire=json.dumps(self.upstream.generations[-1])
+        require('first.csv' in named_wire and 'second.tsv' in named_wire and 'Spreadsheet (csv)' in named_wire and 'Spreadsheet (tsv)' in named_wire,
+                'identical bytes with different filenames or parsing formats were merged')
+        self.cases.append({'case':'chat_identical_bytes_distinct_document_names','http':code,'passed':True})
         self.request('cross_owner_file_id',[{'type':'input_file','file_id':xlsx['id']}],key=API_B,status=404)
         unicode_name='财务报表.xlsx'
         unicode_file=self.upload(unicode_name,content=(FIXTURES/'financials.xlsx').read_bytes())
