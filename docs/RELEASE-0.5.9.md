@@ -48,5 +48,28 @@ non-streaming replies. The HTTP image regression fails with 422 when the image
 normalization is disabled. Existing quota, sticky-session, document and tool
 regressions remain part of the plugin suite.
 
-Production acceptance and the exact application commit/image are recorded after
-cutover. See [OPERATIONS.md](OPERATIONS.md) for build and rollback instructions.
+## Production acceptance
+
+Deployed on 2026-11-22 (Asia/Shanghai) from application commit
+`75924e1495db49f6d5263bcc58292c63fdb75363`. API image:
+`sha256:d6736a4253d7bab834afd21751590ae531ac742a7f81b55c7645f350ecb890e9`.
+The unchanged Manager continues on the verified 0.5.8 image. Both services are
+healthy. Seven credentials, including four BPS accounts, retain their stable
+identities and disabled flags. The existing configuration was unchanged.
+
+Final public-HTTPS checks all passed on `gpt-5.6-sol`:
+
+| Synthetic request | Result | Elapsed |
+| --- | --- | --- |
+| `max`, plain non-streaming Responses | HTTP 200, exact answer | 2.96 s |
+| `max`, 193 history items, 44 custom tool call/result pairs, four tool-result images, SSE | HTTP 200, correct image answer | 5.70 s |
+| `ultra`, simple function result with an image, non-streaming Responses | HTTP 200, correct image answer | 3.19 s |
+
+Each response's input/output/cache token counts matched its Manager record by
+request trace. These are individual smoke measurements, not a speed guarantee.
+The full plugin race suite, plugin vet, targeted CPA host regression and 24
+deployment/migration tests passed. CPA host tests use `-vet=off` for the existing
+upstream sync.Once-copy warning; plugin vet ran normally.
+
+The prior image and private runtime backup are retained. No reset cards were
+consumed. See [OPERATIONS.md](OPERATIONS.md) for build and rollback instructions.

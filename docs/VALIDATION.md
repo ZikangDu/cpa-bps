@@ -18,7 +18,9 @@ These counts are scoped test results, not an uptime guarantee. Some development
 requests failed and are not erased from the private evidence history. In
 particular, the document release's real model test stopped at an upstream 403;
 its isolated parsing/transport checks passed. The later successful production
-smoke results are in [RELEASE-0.5.8.md](RELEASE-0.5.8.md).
+smoke results are in [RELEASE-0.5.8.md](RELEASE-0.5.8.md). The follow-up
+reasoning-alias and tool-result image checks are in
+[RELEASE-0.5.9.md](RELEASE-0.5.9.md).
 
 The upstream CPA full suite has an existing Retry-After assertion expecting 7
 where the host's minimum cooldown returns 10; the same failure was reproduced on
