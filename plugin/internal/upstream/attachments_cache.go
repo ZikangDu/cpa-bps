@@ -42,6 +42,7 @@ type attachmentCache struct {
 	entries map[[sha256.Size]byte]*list.Element
 	order   list.List
 	pending map[[sha256.Size]byte]*pendingImage
+	changed chan struct{}
 	now     func() time.Time
 }
 
@@ -49,6 +50,7 @@ func newAttachmentCache() *attachmentCache {
 	return &attachmentCache{
 		entries: make(map[[sha256.Size]byte]*list.Element),
 		pending: make(map[[sha256.Size]byte]*pendingImage),
+		changed: make(chan struct{}),
 		now:     time.Now,
 	}
 }
@@ -108,8 +110,14 @@ func (c *attachmentCache) get(ctx context.Context, key [sha256.Size]byte, upload
 			}
 		}
 		if len(c.pending) >= maxPendingAttachments {
+			changed := c.changed
 			c.mu.Unlock()
-			return "", ErrImageUpload
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-changed:
+				continue
+			}
 		}
 		pending := &pendingImage{done: make(chan struct{})}
 		c.pending[key] = pending
@@ -119,6 +127,8 @@ func (c *attachmentCache) get(ctx context.Context, key [sha256.Size]byte, upload
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		delete(c.pending, key)
+		close(c.changed)
+		c.changed = make(chan struct{})
 		if ownerErr := ctx.Err(); ownerErr != nil {
 			// An upload can complete concurrently with cancellation. Do not publish
 			// its reference to other callers or retain it after the owner stops.

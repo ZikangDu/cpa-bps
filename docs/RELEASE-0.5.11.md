@@ -211,8 +211,10 @@ guards of 64 MiB unique decoded content and 96 MiB encoded data URIs including
 repeats. These aggregate guards deliberately bound proxy resource use; they are
 not claimed as upstream maxima. The generic Files path retains its previous
 8/5/16 limits. Preflight streams strict Base64 through a small hashing/sniffing
-buffer and retains encoded descriptors rather than every decoded image. Only
-serial cache misses decode into one multipart buffer. Same-request deduplication
+buffer and retains encoded descriptors rather than every decoded image. Cache misses use at most four BPS upload workers per request, with a global
+eight-upload ceiling and 64 MiB multipart allocation budget. Generic uploads
+remain serial. A full pending cache waits cancelably; a failed upload cancels
+and joins the batch before any rewritten model payload is returned. Same-request deduplication
 also survives global cache eviction. All history positions and call associations
 remain; no image is dropped or resized. Credential/origin/protocol partitioning,
 TTL, cancellation and bounded singleflight behavior remain in force.
@@ -231,3 +233,9 @@ Boundary tests cover 20 MiB, 64 MiB, 96 MiB and 1024 references, plus padding/CR
 and equivalent encodings. Strict Base64 property fuzz completed 305,564 executions.
 Fixture-only test libraries are never deployment artifacts. Live acceptance and
 final deployment provenance are recorded separately after completion.
+
+The first serial-upload candidate completed real 23-image and 100-image requests
+with correct visual answers, but the 100-image request took 105.5 seconds even
+with some attachments already cached. Bounded parallel upload was added to avoid
+turning the corrected image-count support into excessive cold-upload latency.
+The original serial timings remain in the private acceptance evidence.

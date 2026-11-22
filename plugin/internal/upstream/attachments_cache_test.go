@@ -310,11 +310,71 @@ func TestAttachmentCacheBoundsCompletedAndPendingEntries(t *testing.T) {
 		key := sha256.Sum256([]byte(fmt.Sprintf("pending-%d", index)))
 		cache.pending[key] = &pendingImage{done: make(chan struct{})}
 	}
-	_, err := cache.get(context.Background(), sha256.Sum256([]byte("overflow")), func() (string, error) {
-		t.Error("pending limit allowed an extra upload")
-		return "file-fixture", nil
-	})
-	if !errors.Is(err, ErrImageUpload) || len(cache.pending) != maxPendingAttachments {
+	base, cancel := context.WithCancel(context.Background())
+	ctx := &observedWaitContext{Context: base, waiting: make(chan struct{})}
+	done := make(chan error, 1)
+	go func() {
+		_, err := cache.get(ctx, sha256.Sum256([]byte("overflow")), func() (string, error) { t.Error("pending limit allowed an extra upload"); return "file-fixture", nil })
+		done <- err
+	}()
+	<-ctx.waiting
+	cancel()
+	err := <-done
+	if !errors.Is(err, context.Canceled) || len(cache.pending) != maxPendingAttachments {
 		t.Fatal("pending upload bound was not enforced")
+	}
+}
+
+func TestAttachmentPendingCapacityWaitsAndDoesNotBlockHotCache(t *testing.T) {
+	cache := newAttachmentCache()
+	hot := sha256.Sum256([]byte("hot"))
+	if _, err := cache.get(context.Background(), hot, func() (string, error) { return "file-hot", nil }); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{}, maxPendingAttachments)
+	releases := make([]chan struct{}, maxPendingAttachments)
+	var group sync.WaitGroup
+	for i := range maxPendingAttachments {
+		releases[i] = make(chan struct{})
+		group.Go(func() {
+			_, err := cache.get(context.Background(), sha256.Sum256([]byte(fmt.Sprintf("pending-%d", i))), func() (string, error) {
+				started <- struct{}{}
+				<-releases[i]
+				return fmt.Sprintf("file-pending-%d", i), nil
+			})
+			if err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	for range maxPendingAttachments {
+		<-started
+	}
+	ctx := &observedWaitContext{Context: context.Background(), waiting: make(chan struct{})}
+	admitted := make(chan struct{})
+	group.Go(func() {
+		_, err := cache.get(ctx, sha256.Sum256([]byte("waiting-new-key")), func() (string, error) { close(admitted); return "file-admitted", nil })
+		if err != nil {
+			t.Error(err)
+		}
+	})
+	<-ctx.waiting
+	cache.mu.Lock()
+	count := len(cache.pending)
+	cache.mu.Unlock()
+	if count != maxPendingAttachments {
+		t.Fatal("pending map escaped its cap")
+	}
+	if id, err := cache.get(context.Background(), hot, func() (string, error) { t.Error("hot cache entry attempted upload"); return "", ErrImageUpload }); err != nil || id != "file-hot" {
+		t.Fatal("full pending queue blocked cache hit", err)
+	}
+	close(releases[0])
+	<-admitted
+	for _, release := range releases[1:] {
+		close(release)
+	}
+	group.Wait()
+	if len(cache.pending) != 0 {
+		t.Fatal("finished capacity wait retained pending entry")
 	}
 }

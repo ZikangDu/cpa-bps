@@ -119,28 +119,18 @@ func (c *Client) rewriteImages(ctx context.Context, filesURL, token string, payl
 		}
 		return payload, nil
 	}
-	// Preflight every image before creating any files. A failed upload is not
-	// replayed, and the caller receives no partially rewritten request.
-	fileIDs := make(map[*inlineImageContent]string)
+	// Preflight every image before creating any files. Only a complete upload
+	// batch may produce a rewritten request; partial failures never generate.
+	fileIDs, err := c.uploadInlineImages(ctx, filesURL, token, rewrites, bps)
+	if err != nil {
+		return nil, err
+	}
 	for _, rewrite := range rewrites {
 		for _, image := range rewrite.images {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
 			fileID := fileIDs[image.content]
-			if fileID == "" {
-				key := attachmentCacheKey(filesURL, token, image, bps)
-				var errUpload error
-				fileID, errUpload = uploadedImages.get(ctx, key, func() (string, error) {
-					return c.uploadImage(ctx, filesURL, token, image, bps)
-				})
-				if errUpload != nil {
-					return nil, errUpload
-				}
-				// Request-local reuse remains valid even if unrelated concurrent
-				// uploads evict this reference from the global bounded cache.
-				fileIDs[image.content] = fileID
-			}
 			if bps {
 				// Native references do not accept public detail or extensions.
 				image.part = bpsImageReference(fileID)
@@ -461,11 +451,16 @@ func (c *Client) uploadImage(ctx context.Context, endpoint, token string, image 
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	var body bytes.Buffer
-	// One pre-sized multipart buffer owns the decoded image only for this
-	// serial cache miss. Preflight and other image descriptors retain no bytes.
-	body.Grow(image.content.bytes + 2048)
-	form := multipart.NewWriter(&body)
+	allocation := image.content.bytes + 2048
+	release, err := imageUploads.acquire(ctx, allocation)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+	// Reserve before allocation. The bounded writer prevents multipart growth
+	// beyond the bytes held by the global admission permit.
+	body := bytes.NewBuffer(make([]byte, 0, allocation))
+	form := multipart.NewWriter(&imageMultipartWriter{body: body, remaining: allocation})
 	fields := [][2]string{
 		{"purpose", "vision"},
 		{"expires_after[anchor]", "created_at"},
@@ -500,7 +495,7 @@ func (c *Client) uploadImage(ctx context.Context, endpoint, token string, image 
 	if err := form.Close(); err != nil {
 		return "", ErrImageUpload
 	}
-	request, err := newRequest(ctx, http.MethodPost, endpoint, token, &body)
+	request, err := newRequest(ctx, http.MethodPost, endpoint, token, body)
 	if err != nil {
 		return "", err
 	}

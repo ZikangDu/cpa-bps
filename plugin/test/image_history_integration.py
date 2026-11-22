@@ -90,6 +90,20 @@ class State:
         self.uploads = []; self.generations = []; self.file_ids = {}; self.expected = {}
         self.hold_digest = None; self.hold_kind = None
         self.upload_entered = threading.Event(); self.upload_release = threading.Event(); self.upload_canceled = threading.Event()
+        self.upload_active = self.upload_peak = 0
+        self.upload_delay = 0
+        self.parallel_digests = set()
+        self.fail_digests = set(); self.fail_target = None
+        self.fail_started = 0; self.fail_canceled = 0
+        self.fail_ready = threading.Event(); self.fail_canceled_all = threading.Event()
+    def upload_window(self, delay=0):
+        with self.lock:
+            require(self.upload_active == 0, 'prior upload phase did not drain')
+            self.upload_peak = 0; self.upload_delay = delay
+    def upload_peak_value(self):
+        with self.lock:
+            return self.upload_peak
+
     def counts(self):
         with self.lock:
             return len(self.uploads), len(self.generations)
@@ -118,27 +132,8 @@ class Fixture(http.server.BaseHTTPRequestHandler):
         if account is None: self.reply(401, {}); return
         raw = self.rfile.read(int(self.headers.get('Content-Length', '0')))
         if self.path == '/basispoints/api/attachments':
-            message = BytesParser(policy=policy.default).parsebytes(('Content-Type: '+self.headers.get('Content-Type', '')+'\r\nMIME-Version: 1.0\r\n\r\n').encode()+raw)
-            fields = {part.get_param('name', header='content-disposition'): part.get_payload(decode=True) for part in message.iter_parts()}
-            data = fields.get('file', b''); digest = hashlib.sha256(data).hexdigest()
-            if fields.get('purpose') != b'vision' or not data.startswith(b'\x89PNG\r\n\x1a\n'):
-                self.reply(400, {}); return
-            with state.lock:
-                file_id = 'file-'+account+'-'+digest[:24]
-                state.uploads.append({'account': account, 'digest': digest, 'bytes': len(data)})
-                state.file_ids[file_id] = (account, digest)
-                hold_kind = state.hold_kind if digest == state.hold_digest else None
-            if hold_kind:
-                state.upload_entered.set()
-                if hold_kind == 'cancel':
-                    self.connection.settimeout(8)
-                    try:
-                        if self.connection.recv(1) == b'': state.upload_canceled.set()
-                    except (BrokenPipeError, ConnectionResetError): state.upload_canceled.set()
-                    except TimeoutError: pass
-                    return
-                if not state.upload_release.wait(10): self.reply(504, {}); return
-            self.reply(200, {'openai_file_id': file_id}); return
+            self.handle_upload(state, account, raw)
+            return
         if self.path != '/basispoints/api/responses': self.reply(404, {}); return
         body = json.loads(raw)
         markers = MARKER.findall(json.dumps(body)); marker = markers[-1] if markers else ''
@@ -163,6 +158,57 @@ class Fixture(http.server.BaseHTTPRequestHandler):
         if violations: self.reply(422, {'error': {'code': 'invalid_fixture_images'}}); return
         response = {'id': 'resp_'+marker, 'status': 'completed', 'model': MODEL, 'output': [{'type': 'message', 'id': 'msg_'+marker, 'role': 'assistant', 'phase': 'final_answer', 'status': 'completed', 'content': [{'type': 'output_text', 'text': 'IMAGE_OK'}]}], 'usage': {'input_tokens': 12, 'output_tokens': 3, 'total_tokens': 15}}
         self.reply(200, frame({'type': 'response.created', 'response': {'id': response['id'], 'status': 'in_progress', 'output': []}})+frame({'type': 'response.completed', 'response': response}), 'text/event-stream')
+
+
+    def handle_upload(self, state, account, raw):
+        message = BytesParser(policy=policy.default).parsebytes(('Content-Type: '+self.headers.get('Content-Type', '')+'\r\nMIME-Version: 1.0\r\n\r\n').encode()+raw)
+        fields = {part.get_param('name', header='content-disposition'): part.get_payload(decode=True) for part in message.iter_parts()}
+        data = fields.get('file', b''); digest = hashlib.sha256(data).hexdigest()
+        if fields.get('purpose') != b'vision' or not data.startswith(b'\x89PNG\r\n\x1a\n'):
+            self.reply(400, {}); return
+        with state.lock:
+            file_id = 'file-'+account+'-'+digest[:24]
+            state.uploads.append({'account': account, 'digest': digest, 'bytes': len(data)})
+            state.file_ids[file_id] = (account, digest)
+            state.upload_active += 1; state.upload_peak = max(state.upload_peak, state.upload_active)
+            hold_kind = state.hold_kind if digest == state.hold_digest else None
+            delay = state.upload_delay
+            parallel = digest in state.parallel_digests
+            failing = digest in state.fail_digests
+            if failing:
+                state.fail_started += 1
+                if state.fail_started == 4: state.fail_ready.set()
+        try:
+            if failing:
+                require(state.fail_ready.wait(5), 'four upload workers did not reach failure fixture')
+                if digest == state.fail_target:
+                    self.reply(503, {'error': {'code': 'fixture_upload_unavailable'}})
+                    return
+                self.connection.settimeout(8)
+                try:
+                    disconnected = self.connection.recv(1) == b''
+                except (BrokenPipeError, ConnectionResetError): disconnected = True
+                except TimeoutError: disconnected = False
+                if disconnected:
+                    with state.lock:
+                        state.fail_canceled += 1
+                        if state.fail_canceled == 3: state.fail_canceled_all.set()
+                return
+            if hold_kind or parallel:
+                state.upload_entered.set()
+                if hold_kind == 'cancel':
+                    self.connection.settimeout(8)
+                    try:
+                        if self.connection.recv(1) == b'': state.upload_canceled.set()
+                    except (BrokenPipeError, ConnectionResetError): state.upload_canceled.set()
+                    except TimeoutError: pass
+                    return
+                if not state.upload_release.wait(10): self.reply(504, {}); return
+            if delay:
+                threading.Event().wait(delay)
+            self.reply(200, {'openai_file_id': file_id})
+        finally:
+            with state.lock: state.upload_active -= 1
 
 
 def execute_case(port, state, marker, pictures, stream=False, expected_status=200):
@@ -266,6 +312,46 @@ def run_mode(cpa, plugin, mode, pictures, baseline):
                     state.hold_kind = None; state.hold_digest = None
                     recovered = execute_case(port, state, 'cancel_recovery', [cancel_image]); reports.append({'case': 'cancel_upload', 'upstream_closed': True, 'queue_drained': True, 'new_generations': 0, 'recovery': recovered})
                     require(recovered['new_uploads'] == 1, 'canceled upload reference entered cache')
+                    delayed = [png(20000+i, side=32) for i in range(100)]
+                    state.upload_window(delay=.02)
+                    delayed_report = execute_case(port, state, 'delayed_hundred_cold', delayed)
+                    peak = state.upload_peak_value(); state.upload_window()
+                    require(delayed_report['new_uploads'] == 100 and delayed_report['new_generations'] == 1, 'delayed cold100 lost images')
+                    require(2 <= peak <= 4, f'cold100 upload worker count was not bounded at four: {peak}')
+                    require(delayed_report['elapsed_seconds'] < 1.6, 'cold100 did not remove most of the 2s serial upload wait')
+                    delayed_report.update({'per_upload_delay_ms': 20, 'serial_delay_floor_seconds': 2, 'peak_uploads': peak,
+                                           'speedup_vs_serial_delay_floor': round(2 / delayed_report['elapsed_seconds'], 2)})
+                    reports.append(delayed_report)
+                    distinct = [[png(21000+index*4+part, side=32) for part in range(4)] for index in range(20)]
+                    state.upload_window(); state.upload_release.clear(); state.upload_entered.clear()
+                    with state.lock: state.parallel_digests = {hashlib.sha256(picture).hexdigest() for images in distinct for picture in images}
+                    before = state.counts()
+                    with ThreadPoolExecutor(max_workers=20) as pool:
+                        futures = [pool.submit(execute_case, port, state, 'distinct_'+str(index), images, bool(index%2)) for index, images in enumerate(distinct)]
+                        require(state.upload_entered.wait(5), 'distinct image upload cohort did not start'); queue(active=20)
+                        state.upload_release.set()
+                        distinct_results = [future.result(timeout=30) for future in futures]
+                    after = state.counts(); peak = state.upload_peak_value(); queue(empty=True)
+                    with state.lock: state.parallel_digests = set()
+                    require(after[0]-before[0] == 80 and after[1]-before[1] == 20, 'pending cache capacity rejected distinct concurrent images')
+                    require(2 <= peak <= 8, f'global upload bound exceeded: {peak}')
+                    reports.append({'case': 'twenty_requests_four_distinct', 'clients': 20, 'unique_images': 80, 'new_uploads': 80,
+                                    'new_generations': 20, 'peak_uploads': peak, 'queue_drained': True, 'all_requests_succeeded': True})
+                    failures = [png(22000+i, side=32) for i in range(20)]
+                    state.upload_window()
+                    with state.lock:
+                        state.fail_digests = {hashlib.sha256(picture).hexdigest() for picture in failures}
+                        state.fail_target = hashlib.sha256(failures[0]).hexdigest()
+                    failed_report = execute_case(port, state, 'partial_upload_failure', failures, expected_status=502)
+                    require(state.fail_canceled_all.wait(2), 'failed upload did not promptly cancel sibling uploads')
+                    queue(empty=True)
+                    require(failed_report['new_uploads'] == 4 and failed_report['new_generations'] == 0, 'failed batch dispatched later images or generated output')
+                    require(failed_report['elapsed_seconds'] < 2, 'failed upload waited for blocked sibling timeouts')
+                    with state.lock:
+                        failed_report['sibling_uploads_canceled'] = state.fail_canceled
+                        state.fail_digests = set(); state.fail_target = None
+                    failed_report.update({'remaining_images_not_uploaded': 16, 'queue_drained': True})
+                    reports.append(failed_report)
                     set_disabled('A.json', True); set_disabled('B.json', False)
                     crossed = execute_case(port, state, 'account_b', pictures); reports.append(crossed)
                     require(crossed['new_uploads'] == 23 and crossed['new_generations'] == 1, 'replacement account reused foreign image file IDs')
