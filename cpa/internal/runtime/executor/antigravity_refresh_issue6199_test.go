@@ -209,7 +209,7 @@ func TestIssue6199AntigravityProjectAcquisitionHasDeadline(t *testing.T) {
 	}
 }
 
-func TestIssue6199AntigravityOptionalCreditsRefreshIsDeduplicatedWithoutDeadline(t *testing.T) {
+func TestIssue6199AntigravityOptionalCreditsRefreshIsDeduplicatedAcrossRefreshes(t *testing.T) {
 	useAntigravityOAuthTestClient(t)
 	synctest.Test(t, func(t *testing.T) {
 		release := make(chan struct{})
@@ -221,9 +221,7 @@ func TestIssue6199AntigravityOptionalCreditsRefreshIsDeduplicatedWithoutDeadline
 				return issue6199AntigravityJSONResponse(req, `{"access_token":"new-access","expires_in":3600}`), nil
 			case "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist":
 				creditsCalls++
-				if _, ok := req.Context().Deadline(); ok {
-					t.Error("optional credits lookup inherited a network deadline from token acquisition")
-				}
+				issue6199AssertBoundedCreditsDeadline(t, req.Context())
 				<-release
 				return issue6199AntigravityJSONResponse(req, `{"paidTier":{"id":"tier","availableCredits":[]}}`), nil
 			default:
@@ -309,6 +307,21 @@ func issue6199AssertCreditsBalance(t *testing.T, authID string, amount float64) 
 	}
 }
 
+// issue6199AssertBoundedCreditsDeadline verifies the optional post-refresh
+// credits request carries the bounded warm-hint budget introduced by #7702,
+// not the longer OAuth credential-acquisition deadline.
+func issue6199AssertBoundedCreditsDeadline(t *testing.T, ctx context.Context) {
+	t.Helper()
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Error("post-refresh credits request lost its bounded warm-hint deadline")
+		return
+	}
+	if until := time.Until(deadline); until <= 0 || until > antigravityCreditsHintRefreshTimeout {
+		t.Errorf("post-refresh credits deadline budget = %s, want within warm-hint timeout %s", until, antigravityCreditsHintRefreshTimeout)
+	}
+}
+
 func TestIssue6199AntigravityCreditsRecoverAfterLifecycleCancellation(t *testing.T) {
 	useAntigravityOAuthTestClient(t)
 	synctest.Test(t, func(t *testing.T) {
@@ -343,9 +356,7 @@ func TestIssue6199AntigravityCreditsRecoverAfterLifecycleCancellation(t *testing
 		if oldRequest == nil {
 			t.Fatal("old lifecycle credits request did not start")
 		}
-		if _, ok := oldRequest.Deadline(); ok {
-			t.Error("optional credits request acquired a network deadline")
-		}
+		issue6199AssertBoundedCreditsDeadline(t, oldRequest)
 
 		cancelLifecycle()
 		synctest.Wait()
@@ -368,9 +379,7 @@ func TestIssue6199AntigravityCreditsRecoverAfterLifecycleCancellation(t *testing
 				return issue6199AntigravityJSONResponse(req, `{"access_token":"healthy-access","expires_in":3600}`), nil
 			case "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist":
 				healthyCalls++
-				if _, ok := req.Context().Deadline(); ok {
-					t.Error("healthy optional credits request acquired a network deadline")
-				}
+				issue6199AssertBoundedCreditsDeadline(t, req.Context())
 				return issue6199CreditsBalanceResponse(req, 900), nil
 			default:
 				return nil, fmt.Errorf("unexpected intercepted request: %s", req.URL)
@@ -426,9 +435,7 @@ func TestIssue6199AntigravityCreditsReplaceOldRegistrationEpoch(t *testing.T) {
 				return issue6199AntigravityJSONResponse(req, `{"access_token":"replacement-access","expires_in":3600}`), nil
 			case "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist":
 				healthyCalls++
-				if _, ok := req.Context().Deadline(); ok {
-					t.Error("replacement optional credits request acquired a network deadline")
-				}
+				issue6199AssertBoundedCreditsDeadline(t, req.Context())
 				return issue6199CreditsBalanceResponse(req, 1200), nil
 			default:
 				return nil, fmt.Errorf("unexpected intercepted request: %s", req.URL)

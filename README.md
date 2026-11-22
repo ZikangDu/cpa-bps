@@ -1,7 +1,7 @@
 # CPA BPS Reconstruction
 
 A maintainable BPS provider plugin, a compatible CPA host, and the matching
-Manager interface. Current release: **0.5.11-reconstructed**.
+Manager interface. Current release: **0.5.11-reconstructed**, with the **8.1.0-bps.1** CPA core.
 
 This is an independently maintained reconstruction. It is not the issuer's
 original BPS 0.5.31 Go source. The legacy ZIP already present in this repository
@@ -21,7 +21,7 @@ is a historical release artifact and is not used to build the reconstruction.
 
 [Source map](docs/SOURCE-MAP.md) · [Architecture](docs/ARCHITECTURE.md) ·
 [Operations and rollback](docs/OPERATIONS.md) · [Validation](docs/VALIDATION.md) ·
-[Release acceptance](docs/RELEASE-0.5.11.md) · [Third-party notices](docs/THIRD-PARTY.md)
+[Core upgrade](docs/CORE-8.1.0.md) · [Release acceptance](docs/RELEASE-0.5.11.md) · [Third-party notices](docs/THIRD-PARTY.md)
 
 ## Build
 

@@ -267,6 +267,8 @@ func (s *signalingCodexOAuthService) ExchangeCodeForTokens(ctx context.Context, 
 }
 
 func TestRequestCodexTokenLoginDoesNotRaceConfigV8Save(t *testing.T) {
+	t.Setenv("CPA_ANTIGRAVITY_OAUTH_CLIENT_ID", "fixture-client-id")
+	t.Setenv("CPA_ANTIGRAVITY_OAUTH_CLIENT_SECRET", "fixture-client-secret")
 	exchangeDone := make(chan struct{})
 	originalNewCodexOAuthService := newCodexOAuthService
 	newCodexOAuthService = func(cfg *config.Config) codexOAuthService {
