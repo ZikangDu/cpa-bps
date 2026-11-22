@@ -39,5 +39,6 @@ function BpsAccountPlan({ authIndex, scope, className, fallback = '-' }) {
   const visible = state?.owner === owner ? state : null;
   const label = visible?.label || fallback || '-';
   const title = visible?.label ? `${label} · ${visible.source === 'active_usage' ? '最近额度查询' : '账号授权信息'}` : '套餐暂未提供';
-  return K.jsx('span', { className, title, 'data-bps-account-plan': authIndex, children: label });
+  const readable = label.split('_').flatMap((part, index) => index ? ['_', K.jsx('wbr', {}, `plan-break-${index}`), part] : [part]);
+  return K.jsx('span', { className, title, 'data-bps-account-plan': authIndex, children: readable });
 }

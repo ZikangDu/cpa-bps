@@ -16,7 +16,7 @@ import (
 )
 
 func qualityDefaults() quality.Config {
-	return quality.Config{Models: []string{}, IntervalMinutes: 360, ReasoningEffort: "high", Prompt: candy.DefaultPrompt, ExpectedAnswer: candy.DefaultExpectedAnswer}
+	return quality.Config{Models: []string{}, IntervalMinutes: 30, ReasoningEffort: "high", Prompt: candy.DefaultPrompt, ExpectedAnswer: candy.DefaultExpectedAnswer}
 }
 
 // startQualityLocked is called only after plugin config validation while r.mu

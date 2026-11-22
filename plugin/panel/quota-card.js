@@ -227,7 +227,7 @@ function zae({ authIndex, scope }) {
   const issues = [state.error, data?.warning, data?.observedAt && !fresh ? '额度快照已过期，请刷新确认。' : null].filter(Boolean);
   const lines = [
     h('div', { className: Bg.heading }, [
-      h('span', {}, ['套餐 ', h('strong', {}, data?.plan || (loading ? '读取中…' : '待确认'))]),
+      h('span', {}, ['套餐 ', h('strong', {}, (data?.plan || (loading ? '读取中…' : '待确认')).split('_').flatMap((part, index) => index ? ['_', h('wbr', { key: `plan-break-${index}` }), part] : [part]))]),
       h('button', { type: 'button', disabled: loading || submitting, onClick: refresh,
         title: '主动查询套餐、额度和重置卡数量' }, loading ? '读取中…' : '刷新')
     ]),

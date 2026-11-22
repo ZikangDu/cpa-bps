@@ -6,7 +6,13 @@
 .bps-account-controls .BpsQuotaCard-module__card___mDZ9G button,.bps-quality button{border:1px solid var(--border-color,#cbd5e1);background:var(--bg-primary,#fff);color:var(--text-primary,#263343);border-radius:5px;padding:2px 5px;min-height:24px;font-size:11px;line-height:1.3;cursor:pointer}
 .bps-account-controls .BpsQuotaCard-module__card___mDZ9G button:disabled,.bps-quality button:disabled{cursor:default;opacity:.55}
 .bps-account-controls .BpsQuotaCard-module__window___b3V-q{gap:3px;margin-top:6px}
-.bps-account-controls .BpsQuotaCard-module__window___b3V-q progress{height:5px;display:block;accent-color:var(--success-color,#16a34a)}
+/* Native progress rendering varies by browser; share the exact request-success token. */
+.bps-account-controls .BpsQuotaCard-module__window___b3V-q progress{appearance:none;-webkit-appearance:none;border:0;border-radius:999px;height:6px;width:100%;display:block;overflow:hidden;background:var(--border-color,#e5e7eb);color:var(--success-color,#22c55e);accent-color:var(--success-color,#22c55e)}
+.bps-account-controls progress::-webkit-progress-bar{background:var(--border-color,#e5e7eb);border-radius:999px}
+.bps-account-controls progress::-webkit-progress-value{background:var(--success-color,#22c55e);border-radius:999px}
+.bps-account-controls progress::-moz-progress-bar{background:var(--success-color,#22c55e);border-radius:999px}
+.bps-account-controls .BpsQuotaCard-module__heading___eOgMY>span{min-width:0;overflow-wrap:anywhere}
+.bps-account-controls .BpsQuotaCard-module__heading___eOgMY>button{flex-shrink:0;white-space:nowrap}
 .bps-account-controls p{margin:5px 0;line-height:1.35}
 .bps-account-controls .BpsQuotaCard-module__muted___ryYmy{color:var(--text-secondary,#526171);line-height:1.4}
 .bps-account-controls summary{color:var(--text-secondary,#526171);cursor:pointer;margin-top:7px;font-size:11px;white-space:nowrap}
@@ -49,48 +55,43 @@
 .bps-quality-result pre{font-family:inherit;font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere;margin:0;max-height:220px;overflow:auto;line-height:1.5}
 .bps-quality :focus-visible,.bps-account-controls :focus-visible{outline:2px solid var(--primary-color,#2563eb);outline-offset:2px}
 .bps-quality ::selection,.bps-account-controls ::selection{background:var(--primary-color,#2563eb);color:#fff}
-/* Only lists containing BPS accounts use these seven fitting columns. */
-.AccountsPage-module__accountCardList___oSmNF:has(.bps-account-controls){min-width:0;padding:8px;gap:7px}
-.AccountsPage-module__accountCardList___oSmNF:has(.bps-account-controls)>.AccountsPage-module__accountCardHeader___7o2oz,
-.AccountsPage-module__accountCardList___oSmNF:has(.bps-account-controls)>.AccountsPage-module__accountCard___MZEtK{grid-template-columns:minmax(120px,1.1fr) 52px 70px minmax(130px,1fr) minmax(100px,.75fr) minmax(245px,2fr) 132px;column-gap:10px;padding-left:10px;padding-right:10px}
-.AccountsPage-module__accountCard___MZEtK:has(.bps-account-controls){min-height:158px;padding-top:10px;padding-bottom:10px;row-gap:0}
-.AccountsPage-module__accountCard___MZEtK:has(.bps-account-controls)>*{min-width:0}
-.AccountsPage-module__accountCard___MZEtK:has(.bps-account-controls) .AccountsPage-module__rowActions___KxR7E{width:124px;min-width:124px;grid-template-columns:58px 1px 54px;gap:5px}
-.AccountsPage-module__accountCard___MZEtK:has(.bps-account-controls) .AccountsPage-module__rowActions___KxR7E [class*="accountQuickActionsGrid"] .btn{width:27px;min-width:27px;height:27px;min-height:27px}
+/* Table identity and its original actions form one group in DOM and focus order. */
+.AccountsPage-module__accountCardList___oSmNF.bps-credential-table{min-width:0;padding:8px;gap:8px}
+.bps-credential-table>.AccountsPage-module__accountCardHeader___7o2oz,
+.bps-credential-table>.AccountsPage-module__accountCard___MZEtK{grid-template-columns:minmax(200px,1.15fr) 112px 104px minmax(160px,1fr) minmax(108px,.7fr) minmax(300px,1.85fr);column-gap:12px;padding-left:12px;padding-right:12px}
+.bps-credential-table>.AccountsPage-module__accountCard___MZEtK{min-height:158px;padding-top:14px;padding-bottom:14px;row-gap:12px}
+.bps-credential-table>.AccountsPage-module__accountCard___MZEtK>*{min-width:0}
+.bps-credential-cell{display:flex;flex-direction:column;justify-content:center;gap:16px;min-width:0;align-self:stretch}
+.bps-credential-cell>.AccountsPage-module__accountCardIdentity___SCJPr{flex:0 0 auto;align-self:auto;border:0;padding:0;grid-column:auto}
+.bps-credential-actions{padding-left:45px;min-width:0}
+.bps-credential-table .bps-credential-actions .AccountsPage-module__rowActions___KxR7E{width:132px;min-width:132px;max-width:100%;grid-template-columns:64px 1px 54px;gap:6px}
+.bps-credential-table .bps-credential-actions [class*="accountQuickActionsGrid"]{grid-template-columns:repeat(2,30px);grid-auto-rows:30px;gap:4px}
+.bps-credential-table .bps-credential-actions [class*="accountQuickActionsGrid"] .btn{width:30px;min-width:30px;height:30px;min-height:30px;padding:0}
+.bps-credential-table .AccountsPage-module__accountCardHealth___R5sd-{border:0;padding:0}
+.bps-credential-table .AccountsPage-module__accountPriorityMeta___4TpEx{overflow:visible;text-overflow:clip}
+.bps-credential-table .AccountsPage-module__accountPlanName___5NX-7{max-width:100%;white-space:normal;overflow-wrap:anywhere;text-overflow:clip;line-height:1.35;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;text-wrap:balance}
 @media(max-width:1230px){
-.AccountsPage-module__accountCardList___oSmNF:has(.bps-account-controls)>.AccountsPage-module__accountCardHeader___7o2oz{display:none}
-.AccountsPage-module__accountCardList___oSmNF:has(.bps-account-controls)>.AccountsPage-module__accountCard___MZEtK{grid-template-columns:minmax(130px,1.2fr) 54px 72px minmax(140px,1fr) minmax(245px,1.5fr);gap:10px}
-.AccountsPage-module__accountCard___MZEtK:has(.bps-account-controls)>:nth-child(5){grid-column:1/4;grid-row:2;flex-direction:row;justify-content:flex-start}
-.AccountsPage-module__accountCard___MZEtK:has(.bps-account-controls)>.bps-account-controls{grid-column:5;grid-row:1/3}
-.AccountsPage-module__accountCard___MZEtK:has(.bps-account-controls)>:nth-child(7){grid-column:4;grid-row:2;align-self:end;justify-content:flex-start}
+.bps-credential-table>.AccountsPage-module__accountCardHeader___7o2oz{display:none}
+.bps-credential-table>.AccountsPage-module__accountCard___MZEtK{grid-template-columns:minmax(200px,1.2fr) minmax(112px,.65fr) minmax(104px,.7fr);gap:16px}
+.bps-credential-cell{grid-column:1;grid-row:1}
+.bps-credential-table .AccountsPage-module__accountCardPlan___XVv2x{grid-column:2;grid-row:1}
+.bps-credential-table .AccountsPage-module__accountCardHealth___R5sd-{grid-column:3;grid-row:1}
+.bps-credential-table .AccountsPage-module__accountCardLatestRequest___t6KUk{grid-column:1;grid-row:2/4;border:0;padding:0}
+.bps-credential-table .AccountsPage-module__accountCardEvidence___AJsP0{grid-column:2/4;grid-row:3;border:0;padding:0}
+.bps-credential-table .bps-account-controls,.bps-credential-table .AccountsPage-module__accountCardBusiness___d34Iv{grid-column:2/4;grid-row:2;border:0;padding:0}
+.bps-account-controls{grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:12px}
 }
-@media(max-width:900px){
-.AccountsPage-module__accountCardList___oSmNF:has(.bps-account-controls)>.AccountsPage-module__accountCard___MZEtK{grid-template-columns:minmax(170px,1.25fr) minmax(90px,.6fr) minmax(100px,.65fr);gap:12px}
-.AccountsPage-module__accountCard___MZEtK:has(.bps-account-controls)>:nth-child(4){grid-column:1;grid-row:2/4}
-.AccountsPage-module__accountCard___MZEtK:has(.bps-account-controls)>.bps-account-controls{grid-column:2/4;grid-row:2/4}
-.AccountsPage-module__accountCard___MZEtK:has(.bps-account-controls)>:nth-child(5){grid-column:1/3;grid-row:4}
-.AccountsPage-module__accountCard___MZEtK:has(.bps-account-controls)>:nth-child(7){grid-column:3;grid-row:4;justify-content:flex-end}
-.AccountsPage-module__accountCard___MZEtK:has(.bps-account-controls)>:nth-child(1){grid-column:1;grid-row:1;border:0;padding:0}
-.AccountsPage-module__accountCard___MZEtK:has(.bps-account-controls)>:nth-child(2){grid-column:2;grid-row:1}
-.AccountsPage-module__accountCard___MZEtK:has(.bps-account-controls)>:nth-child(3){grid-column:3;grid-row:1;border:0;padding:0}
-.AccountsPage-module__accountCard___MZEtK:has(.bps-account-controls)>:nth-child(4){border:0;padding:0}
-.bps-account-controls{grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:10px}
-}
-@media(max-width:480px){.AccountsPage-module__accountCardList___oSmNF:has(.bps-account-controls)>.AccountsPage-module__accountCard___MZEtK{grid-template-columns:minmax(0,1fr) 48px 66px;gap:8px}.bps-quality-actions{gap:3px}.bps-quality-actions>button{font-size:10px}.bps-concurrency-counts strong{font-size:13px}}
-
 @media(max-width:600px){
-.AccountsPage-module__accountCardList___oSmNF:has(.bps-account-controls)>.AccountsPage-module__accountCard___MZEtK{grid-template-columns:minmax(0,1fr) 48px 72px;gap:10px}
-.AccountsPage-module__accountCard___MZEtK:has(.bps-account-controls)>:nth-child(4){grid-column:1/-1;grid-row:2}
-.AccountsPage-module__accountCard___MZEtK:has(.bps-account-controls)>.bps-account-controls{grid-column:1/-1;grid-row:3}
-.AccountsPage-module__accountCard___MZEtK:has(.bps-account-controls)>:nth-child(5){grid-column:1/3;grid-row:4}
-.AccountsPage-module__accountCard___MZEtK:has(.bps-account-controls)>:nth-child(7){grid-column:3;grid-row:4}
-.bps-real-requests{justify-content:flex-start;gap:12px}.bps-quality-bars{max-width:min(100%,180px)}.bps-quality-actions{justify-content:flex-start}.bps-quality-actions>button{flex:0 1 auto;min-width:90px}
-}
-
-.AccountsPage-module__accountCard___MZEtK:has(.bps-account-controls) [class*="accountQuickActionsGrid"]{grid-template-columns:repeat(2,27px);grid-auto-rows:27px;gap:4px}
-@media(max-width:600px){
-.AccountsPage-module__accountCard___MZEtK:has(.bps-account-controls)>:nth-child(5){grid-column:1;grid-row:4}
-.AccountsPage-module__accountCard___MZEtK:has(.bps-account-controls)>:nth-child(7){grid-column:2/4;grid-row:4}
+.bps-credential-table>.AccountsPage-module__accountCard___MZEtK{grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;padding:14px 12px}
+.bps-credential-cell{grid-column:1/-1;grid-row:1;gap:12px}
+.bps-credential-table .AccountsPage-module__accountCardPlan___XVv2x{grid-column:1;grid-row:2;align-items:flex-start;text-align:left}
+.bps-credential-table .AccountsPage-module__accountCardHealth___R5sd-{grid-column:2;grid-row:2;align-items:flex-start}
+.bps-credential-table .AccountsPage-module__accountCardLatestRequest___t6KUk{grid-column:1/-1;grid-row:3}
+.bps-credential-table .AccountsPage-module__accountCardEvidence___AJsP0{grid-column:1/-1;grid-row:4}
+.bps-credential-table .bps-account-controls,.bps-credential-table .AccountsPage-module__accountCardBusiness___d34Iv{grid-column:1/-1;grid-row:5}
+.bps-credential-actions{padding-left:45px}
+.bps-real-requests{justify-content:space-between;gap:12px}.bps-quality-bars{max-width:100%}
+.bps-quality-actions>button{min-height:30px}
 }
 
 /* The shortcut shares the existing summary line; expanded content keeps native details semantics. */

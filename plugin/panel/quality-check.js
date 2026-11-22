@@ -48,8 +48,19 @@ function bpsQualityTooltip(result) {
 }
 function bpsQualityConfig(payload) {
   const source = payload?.config || {}, models = Array.isArray(source.models) ? source.models.filter(x => typeof x === 'string').slice(0, 16) : [];
-  return { enabled: source.enabled === true, models, interval_minutes: Number.isInteger(source.interval_minutes) ? source.interval_minutes : 360,
+  return { enabled: source.enabled === true, models, interval_minutes: Number.isInteger(source.interval_minutes) ? source.interval_minutes : 30,
     reasoning_effort: source.reasoning_effort || 'high', prompt: bpsQualityString(source.prompt), expected_answer: bpsQualityString(source.expected_answer, 128) };
+}
+function bpsQualityManualModels(selected, config, models, catalogModels, results) {
+  const latestHistoryModel = (Array.isArray(results?.results) ? results.results : [])
+    .find(result => models.includes(result?.requested_model))?.requested_model;
+  // An explicit manual selection (including none) remains authoritative. The
+  // manual default is independent of the periodic plan and only prefers a
+  // model in this account's directory; history does not prove availability.
+  const preferred = Array.isArray(catalogModels) && catalogModels.includes('gpt-6-astra') ? 'gpt-6-astra' : '';
+  return [...new Set(Array.isArray(selected) ? selected : preferred ? [preferred] : config?.models?.length ? config.models
+    : latestHistoryModel ? [latestHistoryModel] : models.slice(0, 1))]
+    .filter(value => models.includes(value)).slice(0, 16);
 }
 function bpsQualityModelsDescription(payload) {
   if (payload?.source === 'host_registered') {
@@ -103,10 +114,12 @@ function bpsQualityLoad(owner, tracker, publish) {
     const config = configReply.status === 'fulfilled' ? bpsQualityConfig(configReply.value) : null;
     const modelPayload = modelsReply.status === 'fulfilled' ? modelsReply.value : {};
     const results = resultsReply.status === 'fulfilled' ? resultsReply.value : {};
-    const models = [...new Set([...(Array.isArray(modelPayload.models) ? modelPayload.models.map(item => typeof item === 'string' ? item : item?.id) : []), ...(config?.models || []), ...(Array.isArray(results.results) ? results.results.map(item => item?.requested_model) : [])])]
+    const catalogModels = [...new Set(Array.isArray(modelPayload.models) ? modelPayload.models.map(item => typeof item === 'string' ? item : item?.id) : [])]
+      .filter(value => typeof value === 'string' && value.length && value.length <= 128);
+    const models = [...new Set([...catalogModels, ...(config?.models || []), ...(Array.isArray(results.results) ? results.results.map(item => item?.requested_model) : [])])]
       .filter(value => typeof value === 'string' && value.length && value.length <= 128);
     const failed = [configReply, resultsReply].find(reply => reply.status === 'rejected');
-    publish({ owner, config, models, results, running: results.running === true || configReply.value?.running === true,
+    publish({ owner, config, models, catalogModels, results, running: results.running === true || configReply.value?.running === true,
       blocked: resultsReply.status === 'fulfilled' ? results.blocked === true : configReply.value?.blocked === true,
       credentialDisabled: results.credential_disabled === true || configReply.value?.credential_disabled === true,
       modelsDescription: modelsReply.status === 'fulfilled' ? bpsQualityModelsDescription(modelPayload) : '',
@@ -216,10 +229,7 @@ function BpsQualityCheck({ authIndex, scope }) {
   [hovered, owner, opened, editing, pickerOpen]);
   const visible = state.owner === owner ? state : {}, config = visible.config;
   const models = visible.models || [];
-  const latestHistoryModel = (Array.isArray(visible.results?.results) ? visible.results.results : [])
-    .find(result => models.includes(result?.requested_model))?.requested_model;
-  const selectedModels = [...new Set(Array.isArray(selected) ? selected : config?.models?.length ? config.models : latestHistoryModel ? [latestHistoryModel] : models.slice(0, 1))]
-    .filter(value => models.includes(value)).slice(0, 16);
+  const selectedModels = bpsQualityManualModels(selected, config, models, visible.catalogModels, visible.results);
   const selectedLabel = selectedModels.length === 1 ? selectedModels[0] : selectedModels.length ? `${selectedModels.length} 个模型` : '选择检测模型';
   const results = bpsQualityResults(visible.results), slots = results.length ? results.slice().reverse() : Array(5).fill(null);
   const hoverResult = visible.config && hovered?.owner === owner && !opened && !editing && !pickerOpen ? hovered.result : null;

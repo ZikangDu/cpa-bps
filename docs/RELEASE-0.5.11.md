@@ -159,3 +159,27 @@ tokens. Both versions also returned explicit upstream rate-limit errors during
 that workload, including after slower spacing; a complete matched warm comparison
 was not obtained. These failures are retained and are not a plugin-cache success
 claim or evidence of zero-error production reliability.
+
+## Same-version credential UI refresh
+
+The credential table now groups its original action controls below each identity,
+using six aligned columns in both single- and mixed-provider lists. The plan
+column is 112 px and wraps at underscores into at most two lines; availability
+is 104 px. Card mode retains its existing structure. BPS quota fills use the same
+`--success-color` token as successful recent requests, with explicit Chromium and
+Firefox progress styling instead of browser-dependent accent rendering.
+
+The manual quality-check picker defaults to `gpt-6-astra` when the selected
+account's current model directory offers it. Explicit manual selections remain
+authoritative, and manual defaults do not overwrite periodic model selections.
+Frontend and backend interval defaults are 30 minutes; schedules remain disabled
+unless explicitly enabled. Existing deployment schedules are updated to the
+requested 30-minute interval while preserving their enabled state and other fields.
+
+Verification used the actual patched Manager bundle with synthetic API responses
+at 1512, 1024 and 390 px. It confirmed six aligned table cells, actions below the
+identity, a complete two-line plan, no horizontal overflow, matching green
+`rgb(34, 197, 94)`, Astra manual selection, a 30-minute disabled schedule dialog,
+unchanged card mode and no unexpected mutations or browser errors. Existing
+panel suites, quality regression/race checks, full-bundle JavaScript syntax and
+patch idempotence passed. The application version remains 0.5.11 as requested.

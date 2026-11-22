@@ -26,7 +26,20 @@ function render(renderOwner, data, overrides = {}) {
 }
 async function main() {
   assert.equal(context.bpsQualityConfig({}).enabled, false);
-  assert.equal(context.bpsQualityConfig({}).interval_minutes, 360);
+  assert.equal(context.bpsQualityConfig({}).interval_minutes, 30);
+  assert.equal(context.bpsQualityConfig({ config }).interval_minutes, 360, 'saved legacy interval is preserved');
+  assert.equal(context.bpsQualityConfig({ config: { ...config, interval_minutes: 75 } }).interval_minutes, 75);
+  const manualModels = (selected, saved, available, catalog, history = []) => JSON.parse(JSON.stringify(
+    context.bpsQualityManualModels(selected, saved, available, catalog, { results: history })));
+  const catalog = ['gpt-5.6-luna', 'gpt-6-astra', 'gpt-6.1-sol'];
+  assert.deepEqual(manualModels(null, { models: [] }, catalog, catalog, [result(1, 'gpt-6.1-sol')]), ['gpt-6-astra']);
+  assert.deepEqual(manualModels(['gpt-5.6-luna', 'gpt-6.1-sol'], { models: [] }, catalog, catalog), ['gpt-5.6-luna', 'gpt-6.1-sol'], 'explicit manual multi-selection wins');
+  assert.deepEqual(manualModels([], { models: [] }, catalog, catalog), [], 'explicit empty selection is not replaced');
+  assert.deepEqual(manualModels(null, { models: ['gpt-5.6-luna', 'gpt-6.1-sol'] }, catalog, catalog), ['gpt-6-astra'], 'periodic models do not override the manual default');
+  assert.deepEqual(manualModels(null, { models: ['gpt-5.6-luna', 'gpt-6.1-sol'] }, catalog, ['gpt-5.6-luna', 'gpt-6.1-sol']), ['gpt-5.6-luna', 'gpt-6.1-sol'], 'saved periodic models remain the fallback without Astra');
+  assert.deepEqual(manualModels(null, { models: [] }, ['gpt-6.1-sol'], ['gpt-6.1-sol']), ['gpt-6.1-sol'], 'missing preferred model falls back legally');
+  assert.deepEqual(manualModels(null, { models: [] }, catalog, ['gpt-5.6-luna', 'gpt-6.1-sol'], [result(1, 'gpt-6.1-sol'), result(2, 'gpt-6-astra')]), ['gpt-6.1-sol'], 'history-only Astra is not treated as currently available');
+  assert.deepEqual(manualModels(null, { models: [] }, [], []), []);
   const filtered = context.bpsQualityResults({ results: Array.from({ length: 25 }, (_, i) => result(i, i % 2 ? 'model-b' : 'model-a')) });
   assert.equal(filtered.length, 20); assert.equal(filtered[0].id, '24'); assert.equal(filtered.at(-1).id, '5');
   assert.equal(new Set(filtered.map(x => x.requested_model)).size, 2, 'timeline includes every model');
@@ -132,6 +145,24 @@ async function main() {
   assert.match(context.bpsQualityError({ status: 409 }, '检测'), /状态冲突/);
   assert.ok(!context.bpsQualityError({ status: 409 }, '检测').includes('正在检测'));
   const data = { owner: b, config, models: ['model-a', 'model-b'], results: { results: [result(1), result(2, 'model-a', 'answer_fail'), result(3, 'model-a', 'request_error'), result(4, 'model-a', 'timeout')] } };
+  const astraData = { ...data, models: catalog, catalogModels: catalog, config: { ...config, models: ['gpt-5.6-luna', 'gpt-6.1-sol'] } };
+  const beforeAstra = requests.length, astraView = render(b, astraData), astraNodes = flatten(astraView.view);
+  assert.equal(requests.length, beforeAstra, 'rendering the new manual default has no network mutation');
+  assert.match(astraNodes.find(n => n.type === 'button' && n.props.className === 'bps-quality-model bps-model-trigger').props.title, /gpt-6-astra/);
+  astraNodes.find(n => n.type === 'button' && n.props.children === '立即检测').props.onClick(); await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(requests.at(-1).body)), { models: ['gpt-6-astra'], reasoning_effort: 'high' });
+  assert.ok(requests.slice(beforeAstra).every(req => req.method === 'POST' && req.url.endsWith('/quality/run')), 'new default never writes the periodic plan');
+  astraNodes.find(n => n.type === 'button' && n.props.children === '周期设置').props.onClick();
+  const astraDraft = astraView.updates.find(update => update.at === 4).next;
+  assert.deepEqual(JSON.parse(JSON.stringify(astraDraft.models)), ['gpt-5.6-luna', 'gpt-6.1-sol']);
+  assert.equal(astraDraft.interval_minutes, 360, 'opening settings keeps saved interval');
+  assert.equal(astraDraft.enabled, false, 'manual default does not enable scheduling');
+  const newConfig = context.bpsQualityConfig({ config: { prompt: config.prompt, expected_answer: '21' } });
+  const newView = render(b, { ...astraData, config: newConfig }), newNodes = flatten(newView.view);
+  newNodes.find(n => n.type === 'button' && n.props.children === '周期设置').props.onClick();
+  const newDraft = newView.updates.find(update => update.at === 4).next;
+  assert.equal(newDraft.interval_minutes, 30); assert.equal(newDraft.enabled, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(newDraft.models)), [], 'manual default is not inserted into periodic models');
   const screen = render(b, data), nodes = flatten(screen.view);
   const bars = nodes.filter(n => /^bps-quality-bar /.test(n.props?.className || ''));
   assert.equal(bars.length, 4); assert.equal(bars.filter(n => n.props.disabled).length, 0, 'existing records have no placeholder pollution');
