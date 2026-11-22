@@ -183,3 +183,13 @@ identity, a complete two-line plan, no horizontal overflow, matching green
 unchanged card mode and no unexpected mutations or browser errors. Existing
 panel suites, quality regression/race checks, full-bundle JavaScript syntax and
 patch idempotence passed. The application version remains 0.5.11 as requested.
+
+The same-version UI refresh was deployed from `7237ab8d0c408cb635b176192d59a685b3de751f`.
+Its API image is `sha256:fb2d4ac48e341c870df1b0be91daa2f6535042d75ceba22e1ce0608a36c9ff39`;
+Manager image is `sha256:63686613b54a23f849874d67af8168b5d9aeebb60421a949179cde0d44fc0e54`.
+Both services are healthy. The current six credentials / three BPS accounts were
+preserved. All three existing BPS periods read back as 30 minutes, with schedules
+still disabled and other configuration fields unchanged. The public application
+script and styles match the verified bundle; both container copies have SHA-256
+`e7453e1a1005176a5609a2f70eadcc63ea0a9e367e5e6e61352328fff39fed54`.
+The prior deployment and quality configuration are retained for rollback.
