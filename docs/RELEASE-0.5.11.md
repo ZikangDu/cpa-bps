@@ -86,8 +86,8 @@ repeated. An XLS answer of `40.0` initially failed an exact-string assertion but
 was numerically correct. An initial memory acknowledgment mismatch is retained;
 subsequent tests independently check exact recall rather than acknowledgment text.
 
-Final cache comparison, public-HTTPS checks and deployment provenance are recorded
-below after verification. No reset card was consumed.
+The observations and production verification below retain failed attempts. No
+reset card was consumed.
 
 ## Time to first text
 
@@ -120,3 +120,42 @@ Every response completed with consistent streamed and terminal text. The new
 version delivered text while generation continued, rather than merely sending
 headers earlier. These small samples show the observed improvement for this
 fixture, not a guaranteed latency or a statistical service-level claim.
+
+## Final acceptance and deployment
+
+Deployed on 2026-11-22 (Asia/Shanghai) from application source commit
+`9ca9cfd5076624bb1e9ec026b509a167857ac03c`. The unchanged CPA component was built
+with revision `67ccdf31689d1b12c6605cef77611a20360be107`. API image:
+`sha256:be90e5296dbeab7ea3d6fd55a9264dec9179ee9d2b3899bc2d9736bb8d87047b`.
+The unchanged Manager uses the verified 0.5.8 image. Both services are healthy.
+All eight credentials, including the newly authorized fifth BPS account, retain
+their identities, disabled flags and concurrency limits. Configuration comparison
+found no changes. The pre-cutover snapshot and previous images remain available.
+
+The new account completed all nine models in JSON and SSE (18/18), eight image/
+document scenarios, and uploaded XLSX/scanned-PDF Files requests including delete
+and read-after-delete checks. During the expanded tool matrix, an intermittent
+Luna failure exposed the native-repair ordering issue. After that final patch,
+Luna completed ten consecutive optional/required calls, and 20 concurrent native
+tool requests all completed with 20 distinct IDs (11.86 seconds for the wave).
+Text waves of 2/5/10/20 clients passed 37/37. The reported three-function call and
+its result round trip passed. Final Linux image checks include safe follow-up
+account switching after HTTP/SSE/JSON errors; the document suite passed 27/27.
+
+Public HTTPS acceptance passed `max` plain Responses, `max` with 193 history
+items / 44 custom call-result pairs / four tool-result images over SSE, and an
+`ultra` function-result image over JSON. All three answers were correct and their
+input/output/cache counters matched Manager records by trace. The exact reported
+three-file-function combination and its result also passed over public HTTPS. A
+public optional-tool prose response delivered its first real text at 2.578 seconds,
+continued through 216 text deltas, and completed at 4.256 seconds; this confirms
+that the public ingress also preserves incremental delivery.
+
+The same-account original/reconstructed GPT-6 Sol cache comparison completed six
+requests. Excluding each cold request, weighted cached/input ratios were 99.54%
+(original) and 99.98% (reconstruction). GPT-6.2 Sol cold requests completed on the
+new account, and one original warm sample reported 11,345/24,671 cached input
+tokens. Both versions also returned explicit upstream rate-limit errors during
+that workload, including after slower spacing; a complete matched warm comparison
+was not obtained. These failures are retained and are not a plugin-cache success
+claim or evidence of zero-error production reliability.
