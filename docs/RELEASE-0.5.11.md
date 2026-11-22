@@ -239,3 +239,32 @@ with correct visual answers, but the 100-image request took 105.5 seconds even
 with some attachments already cached. Bounded parallel upload was added to avoid
 turning the corrected image-count support into excessive cold-upload latency.
 The original serial timings remain in the private acceptance evidence.
+
+The final bounded-parallel image build passed 36 native-ABI scenario groups
+across auto/native/text (144 synthetic generations, including the previous
+functional cases). A 100-upload fixture with a fixed 20 ms delay completed in
+0.77–0.81 s instead of the 2 s serial delay floor, with peak concurrency four.
+Twenty clients uploading four different images each all succeeded, with global
+peak concurrency eight. A failing upload canceled its three active siblings,
+did not dispatch the remaining sixteen images, and produced no generation.
+
+Deployed the image correction on 2026-11-22 from source commit
+`0a4fe43fdfc9bd4fa8d4cd539da8f73dc372b0a4`; API image
+`sha256:22b7fb703c5e3440eba460c2193f8294f7b363d6e0f8425b38cd4b267a601db2`.
+The Manager image, credential identities, configuration and same-version UI
+refresh remain unchanged. Plugin full race/vet and the final Linux document
+suite (27/27) passed.
+
+Actual `gpt-6-astra` acceptance used synthetic images with visible random codes.
+The first 23 images exactly matched the reported request's per-image byte sizes;
+100 unique images totaled 5,436,784 decoded bytes. The 94-item tool history,
+100 unique images, repeated 100-image request and 100 duplicates all completed
+with the correct first/last visual codes. Cold 100-image processing completed in
+46.9 s in the isolated candidate; the hot repeat completed in 12.7 s.
+
+Final public-HTTPS requests also passed: 100 unique images from a cold process
+in 44.8 s, its cached repeat in 16.0 s, and the 23-image / 94-item history in 8.1 s.
+Each returned HTTP 200, the requested model, one successful SSE terminal and
+consistent text. These timings describe this small-image fixture, not arbitrary
+image resolutions or a latency guarantee. No user image was resized or silently
+removed. Upstream authorization, quota and context limits still apply.
