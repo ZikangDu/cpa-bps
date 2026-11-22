@@ -63,7 +63,9 @@ functional and 64 KiB allocation gates under race; its non-instrumented latency
 measurement is now a benchmark rather than applying a 20 ms wall-clock limit
 to race-instrumented scans. Original and merged benchmark medians match (about
 3.3 ms split / 2.4 ms unsplit); no production code or test threshold was relaxed.
-The complete race run is recorded after it finishes.
+The complete corrected race run passed all 108 test-bearing packages (27,907
+passing test/subtest events, 20 existing conditional skips), with zero failures.
+Full vet passed again on the final test tree.
 
 Required integration coverage includes Files/document parsing; Chat/Responses
 conversion; nine-model/effort registration; 100 unique/repeated images and tool
@@ -79,3 +81,46 @@ Only the CPA/BPS application is updated; other Docker projects, ingress and host
 services are untouched. Keep the previous image and complete deployment snapshot
 for rollback. Record any core-created server identity separately from business
 configuration changes.
+
+## Server candidate acceptance
+
+The Linux candidate reused the exact current BPS plugin, document worker and UI
+files; their SHA-256 values matched the running deployment. Its core reported
+`8.1.0-bps.1` with a valid UTC build date, and its new server identity persisted
+in its isolated configuration. Network-disabled rehearsal preserved six
+credentials / three BPS accounts and registered all nine models. Linux document
+27-case, cancellation and five error-followup ABI suites passed.
+
+Real access-token-only candidate checks passed eight models, a `max` reasoning
+alias, function call/result round trip, a gzip Chat request using an uploaded
+XLSX file (foreign caller denied with 404), optional native first-text streaming
+and 100 distinct images. The streamed prose began at 2.070 s and completed at
+3.559 s; the 100-image request completed with the expected visual answer at
+43.995 s. These are limited measurements, not performance guarantees.
+
+GPT-6.2 Sol returned the explicit upstream `bps_rate_limited` event on the new
+core and on an isolated unchanged 8.0.75 core using the same account and request.
+That retained service-side limitation is not marked as a passing generation or
+an upgrade regression; no automatic replay was used to conceal it.
+
+## Production acceptance
+
+Deployed on 2026-11-22 (Asia/Shanghai). Core production source is application
+commit `d42199790e8dc619409cded8f01edc38b2eafaae`; the subsequent test-harness-only
+corrections are in `dae3d7a`. API image:
+`sha256:60ba2997057519c393d56029ba59ae4f348e223b75f4bc0d51ac4fc97abf024e`.
+Build date is `2026-11-22T06:26:26Z`. The core derives from the exact upstream
+v8.1.0 commit listed above; the BPS plugin remains 0.5.11.
+
+The final public HTTPS `gpt-6-sol` / `max` SSE request returned the expected answer
+and one successful terminal in 3.612 s; streamed text matched the terminal and
+input/output/cache usage matched Manager's stored record. Authenticated version
+headers report `8.1.0-bps.1` and a valid build date.
+
+All six credential identities and disabled flags, BPS concurrency limits and
+quality schedules are preserved. The only semantic configuration addition is
+the new upstream-generated persistent server UUID. BPS plugin, document worker
+and UI SHA-256 values match the previous live image exactly. Manager keeps its
+existing image. The previous application image and complete deployment backup
+are retained for rollback. Other project container IDs, images, start times and
+restart counts match the pre-upgrade snapshot.
